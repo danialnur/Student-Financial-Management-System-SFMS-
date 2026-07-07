@@ -168,6 +168,35 @@ export default function ApprovalPage() {
         </div>
       );
     }
+    const shared = "w-full rounded-xl border px-4 py-2.5 text-sm outline-none transition border-amber-200 bg-white focus:border-amber-400";
+    if (f.type === "select") {
+      return (
+        <div key={f.key}>
+          <label className="mb-1 block text-xs font-medium text-amber-800">{f.label}</label>
+          <select
+            value={reviewerFormData[f.key] || ""}
+            onChange={e => setReviewerFormData(p => ({ ...p, [f.key]: e.target.value }))}
+            className={shared}
+          >
+            <option value="">-- Pilih --</option>
+            {(f.options ?? []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
+          </select>
+        </div>
+      );
+    }
+    if (f.type === "textarea") {
+      return (
+        <div key={f.key}>
+          <label className="mb-1 block text-xs font-medium text-amber-800">{f.label}</label>
+          <textarea
+            value={reviewerFormData[f.key] || ""}
+            onChange={e => setReviewerFormData(p => ({ ...p, [f.key]: e.target.value }))}
+            rows={3}
+            className={shared}
+          />
+        </div>
+      );
+    }
     return (
       <div key={f.key}>
         <label className="mb-1 block text-xs font-medium text-amber-800">{f.label}</label>
@@ -176,7 +205,7 @@ export default function ApprovalPage() {
           value={reviewerFormData[f.key] || ""}
           onChange={e => setReviewerFormData(p => ({ ...p, [f.key]: e.target.value }))}
           readOnly={!!f.autoFillReviewer}
-          className={`w-full rounded-xl border px-4 py-2.5 text-sm outline-none transition ${f.autoFillReviewer ? "border-amber-100 bg-amber-100/50 text-gray-500 cursor-not-allowed" : "border-amber-200 bg-white focus:border-amber-400"}`}
+          className={`${shared} ${f.autoFillReviewer ? "border-amber-100 bg-amber-100/50 text-gray-500 cursor-not-allowed" : ""}`}
         />
       </div>
     );

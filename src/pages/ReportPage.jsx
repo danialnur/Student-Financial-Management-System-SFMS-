@@ -294,9 +294,13 @@ function generateTuntutanBayaranBalikPdf(formData, _rows, sig) {
   y=doc.lastAutoTable.finalY+6;
   doc.setFontSize(9); doc.setFont("helvetica","bold");
   doc.text("C.  Pengesahan Ketua / Pengarah / Pegawai yang diturunkan kuasa menguruskan kewangan PTJ",m,y); y+=5;
-  doc.setFont("helvetica","normal"); doc.text("Pembayaran diluluskan:",m,y); y+=14;
+  doc.setFont("helvetica","normal"); doc.text("Pembayaran diluluskan:",m,y); y+=3;
+  // Filled by the reviewer at approval time (config.reviewerSection)
+  if (formData.tandatangan_pengesahan_reviewer) { doc.addImage(formData.tandatangan_pengesahan_reviewer,"PNG",m,y,50,14); }
+  y+=14;
   doc.text("______________________",m,y); y+=5;
-  doc.text("Cop & Tandatangan",m,y); y+=5; doc.text("Tarikh:",m,y); y+=8;
+  doc.text("Cop & Tandatangan",m,y); y+=5;
+  doc.text(`Tarikh: ${formData.tarikh_pengesahan_reviewer||""}`,m,y); y+=8;
   doc.text("Ulasan:",m,y); y+=5;
   doc.line(m,y,pw-m,y); y+=5; doc.line(m,y,pw-m,y);
   addFooter(doc,"B.HEP.BP.(KEW). 01.02/01(01)","1 Oktober 2020");
@@ -391,9 +395,12 @@ function generateTuntutanElaunPdf(formData, rows, sig) {
   y=doc.lastAutoTable.finalY+6;
   doc.setFontSize(9); doc.setFont("helvetica","bold");
   doc.text("C.  Pengesahan Ketua / Pengarah / Pegawai yang diturunkan kuasa menguruskan kewangan PTJ",m,y); y+=5;
-  doc.setFont("helvetica","normal"); doc.text("Pembayaran diluluskan:",m,y); y+=14;
+  doc.setFont("helvetica","normal"); doc.text("Pembayaran diluluskan:",m,y); y+=3;
+  // Filled by the reviewer at approval time (config.reviewerSection)
+  if (formData.tandatangan_pengesahan_reviewer) { doc.addImage(formData.tandatangan_pengesahan_reviewer,"PNG",m,y,50,14); }
+  y+=14;
   doc.text("______________________",m,y); y+=5; doc.text("Cop & Tandatangan",m,y); y+=5;
-  doc.text("Tarikh:",m,y); y+=8; doc.text("Ulasan:",m,y); y+=5;
+  doc.text(`Tarikh: ${formData.tarikh_pengesahan_reviewer||""}`,m,y); y+=8; doc.text("Ulasan:",m,y); y+=5;
   doc.line(m,y,pw-m,y); y+=5; doc.line(m,y,pw-m,y);
   // Lampiran A
   doc.addPage(); doc.setTextColor(0,0,0); doc.setDrawColor(0,0,0);
@@ -408,7 +415,13 @@ function generateTuntutanElaunPdf(formData, rows, sig) {
   autoTable(doc,{startY:ly,margin:{left:m,right:m},theme:"plain",styles:{fontSize:9,textColor:[0,0,0]},
     body:[[{content:"Disediakan Oleh:\n\n\n______________________",styles:{minCellHeight:22}},
            {content:"Disahkan Oleh:\n\n\n______________________",styles:{minCellHeight:22}}]],
-    columnStyles:{0:{cellWidth:hw},1:{cellWidth:hw}}});
+    columnStyles:{0:{cellWidth:hw},1:{cellWidth:hw}},
+    // Reviewer's signature for the Lampiran A sign-off (config.reviewerSection)
+    didDrawCell:(data)=>{
+      if(formData.tandatangan_lampiran_a_reviewer&&data.section==="body"&&data.column.index===1&&data.row.index===0){
+        const c=data.cell; doc.addImage(formData.tandatangan_lampiran_a_reviewer,"PNG",c.x+2,c.y+10,Math.min(c.width-4,52),14);
+      }
+    }});
   addFooter(doc,"B.HEP.BAPP(UA).02.01/04(04)","1 Oktober 2020");
   return doc;
 }
@@ -506,9 +519,21 @@ function generatePermohonancukaiPdf(formData, rows, sig) {
   doc.text(`Tarikh : ${formData.tarikh_tandatangan||""}`,m+100,y);
   y+=6; div(y); y+=6;
   doc.setFont("helvetica","bold"); doc.text("D)  PENGESAHAN JABATAN TIMBALAN NAIB CANSELOR (HEP)",m,y); y+=5;
-  doc.setFont("helvetica","normal"); doc.text("Permohonan ini   *DISOKONG   /   TIDAK DISOKONG",m,y); y+=6;
-  doc.text("Ulasan:",m,y); y+=5; doc.line(m,y,pw-m,y); y+=5; doc.line(m,y,pw-m,y); y+=8;
-  doc.text("Tandatangan  :  ___________________   Tarikh  :  ___________________",m,y); y+=5;
+  doc.setFont("helvetica","normal");
+  // Filled by the reviewer at approval time (config.reviewerSection)
+  doc.text(`Permohonan ini   ${formData.keputusan_reviewer ? formData.keputusan_reviewer.toUpperCase() : "*DISOKONG   /   TIDAK DISOKONG"}`,m,y); y+=6;
+  doc.text("Ulasan:",m,y); y+=5;
+  if (formData.ulasan_reviewer) {
+    const ul = doc.splitTextToSize(formData.ulasan_reviewer, pw-2*m);
+    doc.text(ul,m,y); y += ul.length*4.5;
+  } else {
+    doc.line(m,y,pw-m,y); y+=5; doc.line(m,y,pw-m,y);
+  }
+  y+=8;
+  doc.text("Tandatangan  :",m,y);
+  if (formData.tandatangan_reviewer) { doc.addImage(formData.tandatangan_reviewer,"PNG",m+25,y-9,40,12); }
+  else { doc.text(" ___________________",m+25,y); }
+  doc.text(`Tarikh  :  ${formData.tarikh_reviewer||"___________________"}`,m+100,y); y+=5;
   doc.text("Cop Rasmi    :  ___________________",m,y);
   y+=6; div(y); y+=6;
   doc.setFont("helvetica","bold"); doc.text("E)  KELULUSAN JABATAN BENDAHARI UTM",m,y); y+=5;
@@ -570,11 +595,15 @@ function generatePenyataKewanganPdf(formData, rows, sig) {
   y=doc.lastAutoTable.finalY+2;
   autoTable(doc,{startY:y,margin:{left:m,right:m},theme:"plain",styles:{fontSize:9,textColor:[0,0,0]},
     body:[[{content:`\n\n______________________\nNama        : ${formData.nama_bendahari||""}\nNo. Telefon : ${formData.no_telefon_bendahari||""}\nTarikh      : ${formData.tarikh_penyediaan||""}`,styles:{minCellHeight:30}},
-           {content:"\n\n______________________\nNama        :\nNo. Telefon :\nTarikh      :",styles:{minCellHeight:30}}]],
+           {content:`\n\n______________________\nNama        : ${formData.nama_bendahari_kelab||""}\nNo. Telefon : ${formData.no_tel_bendahari_kelab||""}\nTarikh      : ${formData.tarikh_bendahari_kelab||""}`,styles:{minCellHeight:30}}]],
     columnStyles:{0:{cellWidth:hw},1:{cellWidth:hw}},
     didDrawCell:(data)=>{
       if(sig&&data.section==="body"&&data.column.index===0&&data.row.index===0){
         const c=data.cell; doc.addImage(sig,"PNG",c.x+2,c.y+2,Math.min(c.width-4,52),14);
+      }
+      // Filled by the reviewer (Bendahari Kelab) at approval time (config.reviewerSection)
+      if(formData.tandatangan_bendahari_kelab&&data.section==="body"&&data.column.index===1&&data.row.index===0){
+        const c=data.cell; doc.addImage(formData.tandatangan_bendahari_kelab,"PNG",c.x+2,c.y+2,Math.min(c.width-4,52),14);
       }
     }});
   // Page 2

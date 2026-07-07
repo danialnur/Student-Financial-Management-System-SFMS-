@@ -160,6 +160,15 @@ export const FORMS_CONFIG = [
       tarikh:     "today",
     },
     enforceRequiredFields: true,
+    // Filled by the reviewer at approval time
+    reviewerSection: {
+      label: "Pengesahan",
+      kind: "fixed",
+      fields: [
+        { key: "tandatangan_pengesahan_reviewer", label: "Tandatangan", type: "signature", required: true },
+        { key: "tarikh_pengesahan_reviewer",       label: "Tarikh",     type: "date",      required: true, autoFillReviewer: "today" },
+      ],
+    },
     mandatoryAttachments: [
       { key: "senaraiResitBayaran",       label: "Senarai Resit Bayaran",         hint: "Muat naik senarai resit bayaran. (PDF sahaja)",                      required: true,  maxFiles: 1, accept: "application/pdf" },
       { key: "resitAsal",                 label: "Resit Asal",                    hint: "Muat naik salinan resit asal. (PDF sahaja, boleh lebih daripada satu)", required: true,  maxFiles: 5, accept: "application/pdf" },
@@ -264,6 +273,17 @@ export const FORMS_CONFIG = [
     rowColumnsAllRequired: true,
     rowsRequireAtLeastOne: true,
     enforceRequiredFields: true,
+    // Filled by the reviewer at approval time — same as Form 3, plus a second
+    // signature for the "Disahkan Oleh" slot on the Lampiran A page.
+    reviewerSection: {
+      label: "Pengesahan",
+      kind: "fixed",
+      fields: [
+        { key: "tandatangan_pengesahan_reviewer", label: "Tandatangan (Pengesahan)",                type: "signature", required: true },
+        { key: "tarikh_pengesahan_reviewer",       label: "Tarikh",                                  type: "date",      required: true, autoFillReviewer: "today" },
+        { key: "tandatangan_lampiran_a_reviewer",  label: "Tandatangan (Disahkan Oleh — Lampiran A)", type: "signature", required: true },
+      ],
+    },
     mandatoryAttachments: [
       { key: "suratKelulusanProgram", label: "Surat Kelulusan Program",   hint: "Muat naik salinan surat kelulusan program. (PDF sahaja)",              required: true,  maxFiles: 1, accept: "application/pdf" },
       { key: "borangTukarTarikh",     label: "Borang Tukar Tarikh",       hint: "Muat naik borang tukar tarikh jika berkaitan. (PDF sahaja)",           required: false, maxFiles: 1, accept: "application/pdf" },
@@ -409,6 +429,18 @@ export const FORMS_CONFIG = [
       { key: "suratKelulusanProgram",  label: "Surat Kelulusan Program",                     hint: "Muat naik surat kelulusan program. (PDF atau imej diterima)" },
       { key: "suratPenajaanPihakLuar", label: "Surat Penajaan Pihak Luar / Dalam Kampus UTM", hint: "Muat naik surat penajaan pihak luar atau dalam kampus UTM. (PDF atau imej diterima)" },
     ],
+    // Filled by the reviewer at approval time — must decide Disokong/Tidak
+    // Disokong with a supporting Ulasan, and sign regardless of the decision.
+    reviewerSection: {
+      label: "Pengesahan Jabatan",
+      kind: "fixed",
+      fields: [
+        { key: "keputusan_reviewer",   label: "Keputusan",   type: "select",    required: true, options: ["Disokong", "Tidak Disokong"] },
+        { key: "ulasan_reviewer",      label: "Ulasan",      type: "textarea",  required: true },
+        { key: "tandatangan_reviewer", label: "Tandatangan", type: "signature", required: true },
+        { key: "tarikh_reviewer",      label: "Tarikh",      type: "date",      required: true, autoFillReviewer: "today" },
+      ],
+    },
     sections: [
       {
         id: "A",
@@ -488,6 +520,18 @@ export const FORMS_CONFIG = [
       nama_bendahari:      "fullName",
       no_telefon_bendahari:"phone",
       tarikh_penyediaan:   "today",
+    },
+    // Filled by the reviewer at approval time — in practice this is almost
+    // always the club's own Bendahari Kelab (per submitToOptions above).
+    reviewerSection: {
+      label: "Disemak & Disahkan Oleh Bendahari Kelab",
+      kind: "fixed",
+      fields: [
+        { key: "tandatangan_bendahari_kelab", label: "Tandatangan",  type: "signature", required: true },
+        { key: "nama_bendahari_kelab",        label: "Nama",         type: "text",      required: true, autoFillReviewer: "fullName" },
+        { key: "no_tel_bendahari_kelab",      label: "No. Telefon",  type: "text",      required: true, autoFillReviewer: "phone" },
+        { key: "tarikh_bendahari_kelab",      label: "Tarikh",       type: "date",      required: true, autoFillReviewer: "today" },
+      ],
     },
     sections: [
       {

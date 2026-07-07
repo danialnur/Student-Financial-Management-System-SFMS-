@@ -35,3 +35,6 @@ scripts/
 # Local Claude Code settings (personal, machine-specific)
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Personal presentation aid, not project source
+SFMS-Code-Cheat-Sheet.pdf
