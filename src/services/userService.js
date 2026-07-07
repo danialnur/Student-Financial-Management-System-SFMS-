@@ -2,6 +2,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   orderBy,
   query,
@@ -20,11 +21,14 @@ export async function getAllUsers() {
   return snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
 }
 
+// Public, PII-free lookup used only to resolve a username to an email before
+// the user is authenticated (login-by-username). Backed by its own collection
+// (not the users collection) so Firestore rules can keep `users` fully locked
+// down while still allowing this one pre-auth read.
 export async function getEmailByUsername(username) {
-  const q = query(usersRef, where("username", "==", username.toLowerCase().trim()));
-  const snap = await getDocs(q);
-  if (snap.empty) return null;
-  return snap.docs[0].data().email;
+  const snap = await getDoc(doc(db, "usernames", username.toLowerCase().trim()));
+  if (!snap.exists()) return null;
+  return snap.data().email;
 }
 
 export async function createUserProfile(uid, data) {
@@ -42,6 +46,7 @@ export async function createUserProfile(uid, data) {
     category:     data.role === "pegawai" ? (data.category ?? "") : "",
     createdAt:    serverTimestamp(),
   });
+  await setDoc(doc(db, "usernames", username), { email: data.email, uid });
 }
 
 // role-specific:
@@ -90,7 +95,10 @@ export async function updateUserProfile(uid, { fullName, matricNumber, icNumber,
 }
 
 export async function removeUserAccess(uid) {
+  const snap = await getDoc(doc(db, "users", uid));
+  const username = snap.exists() ? snap.data().username : null;
   await deleteDoc(doc(db, "users", uid));
+  if (username) await deleteDoc(doc(db, "usernames", username));
 }
 
 export async function searchTreasurerByUsernameOrEmail(term) {

@@ -1,0 +1,137 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() { return request.auth != null; }
+
+    // Cached by Firestore within a single rule evaluation, so calling this
+    // multiple times in the same request does not cost multiple reads.
+    function myProfile()  { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function myRole()     { return isSignedIn() ? myProfile().role : null; }
+    function myClub()     { return myProfile().club; }
+    function myClubs()    { return myProfile().clubs; }
+    function myCategory() { return myProfile().category; }
+
+    function isAdmin()          { return isSignedIn() && myRole() == 'admin'; }
+    function isTreasurer()      { return isSignedIn() && myRole() == 'treasurer'; }
+    function isBendahariKelab() { return isSignedIn() && myRole() == 'bendahari_kelab'; }
+    function isAdvisor()        { return isSignedIn() && myRole() == 'advisor'; }
+    function isPegawai()        { return isSignedIn() && myRole() == 'pegawai'; }
+
+    function inClub(club)         { return isBendahariKelab() && myClub() == club; }
+    function inAdvisorClubs(club) { return isAdvisor() && (club in myClubs()); }
+    function inCategory(cat)      { return isPegawai() && myCategory() == cat; }
+
+    // Used for formSubmissions/pdfSubmissions, which denormalize both
+    // createdByClub and createdByCategory, so pegawai scoping can be precise.
+    function isReviewerOfCategory(club, cat) {
+      return isAdmin() || inClub(club) || inAdvisorClubs(club) || inCategory(cat);
+    }
+
+    // Used for transactions, which only denormalize createdByClub (no category
+    // field). Pegawai access here is intentionally role-based rather than
+    // precisely club-matched — see chat notes on this tradeoff.
+    function isReviewerOfClub(club) {
+      return isAdmin() || inClub(club) || inAdvisorClubs(club) || isPegawai();
+    }
+
+    // ── users ──────────────────────────────────────────────────────────────
+    // Full profile documents (name, IC, phone, matric, role, club/clubs/category,
+    // signatures). Self, admin, or a reviewer role looking up a treasurer only.
+    match /users/{userId} {
+      allow get: if isSignedIn() && (
+                    request.auth.uid == userId ||
+                    isAdmin() ||
+                    ((isBendahariKelab() || isAdvisor() || isPegawai()) && resource.data.role == 'treasurer')
+                  );
+      allow list: if isSignedIn() && (
+                    isAdmin() ||
+                    ((isBendahariKelab() || isAdvisor() || isPegawai()) && resource.data.role == 'treasurer')
+                  );
+      allow create: if isSignedIn() && (
+                      isAdmin() ||
+                      (request.auth.uid == userId && request.resource.data.role == 'treasurer')
+                    );
+      allow update: if isSignedIn() && (
+                      isAdmin() ||
+                      (request.auth.uid == userId &&
+                       request.resource.data.role     == resource.data.role &&
+                       request.resource.data.club     == resource.data.club &&
+                       request.resource.data.clubs    == resource.data.clubs &&
+                       request.resource.data.category == resource.data.category &&
+                       request.resource.data.email    == resource.data.email &&
+                       request.resource.data.username == resource.data.username)
+                    );
+      allow delete: if isAdmin();
+    }
+
+    // ── usernames ──────────────────────────────────────────────────────────
+    // PII-free index (username -> email/uid) so the login page can resolve a
+    // username before the user is authenticated. Direct-doc reads only — no
+    // full-collection listing, so it can't be scraped.
+    match /usernames/{username} {
+      allow get:    if true;
+      allow list:   if false;
+      allow create: if isSignedIn() && (isAdmin() || request.auth.uid == request.resource.data.uid);
+      allow update, delete: if isAdmin();
+    }
+
+    // ── transactions ───────────────────────────────────────────────────────
+    match /transactions/{docId} {
+      allow read:   if isSignedIn() && (
+                      resource.data.createdBy == request.auth.uid ||
+                      isReviewerOfClub(resource.data.createdByClub)
+                    );
+      allow create: if isTreasurer() && request.auth.uid == request.resource.data.createdBy;
+      allow update, delete: if isAdmin() || (
+                      isTreasurer() && request.auth.uid == resource.data.createdBy
+                    );
+    }
+
+    // ── programmes ─────────────────────────────────────────────────────────
+    // Low-sensitivity (code/name/club/status) — any signed-in user may browse
+    // (treasurers pick a programme to join from any club), but writes are
+    // scoped to the owning club's bendahari_kelab or admin.
+    match /programmes/{docId} {
+      allow read:   if isSignedIn();
+      allow create: if isAdmin() || (isBendahariKelab() && request.resource.data.club == myClub());
+      allow update, delete: if isAdmin() || (isBendahariKelab() && resource.data.club == myClub());
+    }
+
+    // ── programmeAccess ────────────────────────────────────────────────────
+    match /programmeAccess/{docId} {
+      allow read:   if isSignedIn() && (
+                      resource.data.treasurerUid == request.auth.uid ||
+                      isAdmin() || inClub(resource.data.club)
+                    );
+      allow create: if isAdmin() ||
+                      (isTreasurer() && request.auth.uid == request.resource.data.treasurerUid) ||
+                      (isBendahariKelab() && request.resource.data.club == myClub());
+      allow update: if isAdmin() || inClub(resource.data.club) ||
+                      (isTreasurer() && request.auth.uid == resource.data.treasurerUid);
+      allow delete: if isAdmin() || inClub(resource.data.club);
+    }
+
+    // ── formSubmissions / pdfSubmissions ───────────────────────────────────
+    // Digital-form and direct-PDF submissions. Owner can create/read their own;
+    // reviewers (bendahari_kelab/advisor of the club, pegawai of the category)
+    // and admin can read/update (approve/reject) within their own scope.
+    match /formSubmissions/{docId} {
+      allow read:   if isSignedIn() && (
+                      resource.data.createdBy == request.auth.uid ||
+                      isReviewerOfCategory(resource.data.createdByClub, resource.data.createdByCategory)
+                    );
+      allow create: if isTreasurer() && request.auth.uid == request.resource.data.createdBy;
+      allow update: if isReviewerOfCategory(resource.data.createdByClub, resource.data.createdByCategory);
+    }
+
+    match /pdfSubmissions/{docId} {
+      allow read:   if isSignedIn() && (
+                      resource.data.createdBy == request.auth.uid ||
+                      isReviewerOfCategory(resource.data.createdByClub, resource.data.createdByCategory)
+                    );
+      allow create: if isTreasurer() && request.auth.uid == request.resource.data.createdBy;
+      allow update: if isReviewerOfCategory(resource.data.createdByClub, resource.data.createdByCategory);
+    }
+  }
+}

@@ -67,13 +67,16 @@ export default function TreasurerDashboard() {
   }, [approvedShortcuts, shortcutSearch]);
 
   const filteredProgrammes = useMemo(() => {
+    // Permanently-rejected programmes are hidden entirely from the picker —
+    // there's nothing the treasurer can do with them (MAX_ATTEMPTS = 1, no retry).
+    const visible = programmes.filter(p => accessMap[p.id]?.status !== "rejected");
     const q = progSearch.trim().toLowerCase();
-    if (!q) return programmes;
-    return programmes.filter(p =>
+    if (!q) return visible;
+    return visible.filter(p =>
       p.code.toLowerCase().includes(q) ||
       p.name.toLowerCase().includes(q)
     );
-  }, [programmes, progSearch]);
+  }, [programmes, progSearch, accessMap]);
 
   const handleExpire = useCallback(() => {
     if (uid) {
@@ -153,6 +156,11 @@ export default function TreasurerDashboard() {
             const saved  = progs.find(p => p.id === id);
             if (saved && map[id]?.status === "approved") {
               setSelectedProgramme(saved);
+              // Keep the cached code/name/club in sync in case the programme was renamed
+              // (or its club value corrected) since it was last explicitly selected —
+              // other pages read this cache directly.
+              localStorage.setItem(`sfms_prog_${uid}`, JSON.stringify({ id: saved.id, code: saved.code, name: saved.name }));
+              if (saved.club) localStorage.setItem(`sfms_club_${uid}`, saved.club);
             } else {
               setSelectedProgramme(null);
               localStorage.removeItem(`sfms_prog_${uid}`);
@@ -536,10 +544,8 @@ export default function TreasurerDashboard() {
                   const status      = access?.status ?? null;
                   const isApproved  = status === "approved";
                   const isPending   = status === "pending";
-                  const isRejected  = status === "rejected"; // permanent (MAX_ATTEMPTS = 1)
                   const isRevoked   = status === "revoked";
                   const isSelected  = selectedProgramme?.id === p.id;
-                  const canRequest  = !isApproved && !isPending && !isRejected && !atLimit;
 
                   return (
                     <div
@@ -593,13 +599,6 @@ export default function TreasurerDashboard() {
                               {isSelected ? "✓ Dipilih" : "Pilih"}
                             </button>
                           </div>
-                        )}
-
-                        {/* Rejected — permanent, no retry button */}
-                        {isRejected && (
-                          <span className="inline-flex items-center rounded-full bg-gray-200 px-2.5 py-0.5 text-xs font-semibold text-gray-500">
-                            Ditolak Kekal
-                          </span>
                         )}
 
                         {/* Revoked — can re-request via confirmation page */}

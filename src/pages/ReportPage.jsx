@@ -5,13 +5,14 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { getApprovedTransactionsForReport } from "../services/reportService";
 import { submitBorang, getBorangByUser } from "../services/formService";
+import { getTransactionsByUser } from "../services/transactionService";
 import { submitPdfBorang } from "../services/pdfSubmissionService";
 import { useAuth } from "../context/AuthContext";
 import { FORMS_CONFIG } from "../config/formsConfig";
 import { MALAYSIA_STATES_CITIES } from "../config/malaysiaCities";
-import { saveSignature, deleteSignature } from "../services/signatureService";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage } from "../firebase/config";
+import { SignaturePanel, resolveToDataUrl } from "../components/SignatureCapture";
 
 const todayISO = () => {
   const d = new Date();
@@ -86,9 +87,6 @@ function openPdf(doc, filename = "borang.pdf") {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// Returns the PDF blob without opening (used for submission upload)
-function getPdfBlob(doc) { return doc.output("blob"); }
-
 function addFooter(doc, num, date, rev = "0") {
   const pc = doc.internal.getNumberOfPages(), pw = doc.internal.pageSize.getWidth(), m = 14;
   for (let i = 1; i <= pc; i++) {
@@ -141,6 +139,22 @@ function generateAkuanWangTunaiPdf(formData, _rows, sig) {
   if(formData.ulasan){ y=doc.lastAutoTable.finalY+2;
     autoTable(doc,{startY:y,margin:{left:m,right:m},theme:"grid",styles:TS,headStyles:HS,columnStyles:{0:LC},
       body:[["ULASAN (Jika berkaitan)",formData.ulasan]]}); }
+  // Filled by the reviewer at approval time (config.reviewerSection) — only
+  // rendered once a reviewer has actually signed off.
+  if (formData.tandatangan_diserah || formData.nama_penuh_diserah) {
+    y=doc.lastAutoTable.finalY+6;
+    doc.setTextColor(0,0,0); doc.text("PENGESAHAN (DISERAHKAN OLEH)", m, y); y+=2;
+    autoTable(doc,{ startY:y, margin:{left:m,right:m}, theme:"grid", styles:TS, headStyles:HS, columnStyles:{0:LC},
+      body:[[{content:"TANDATANGAN",styles:{minCellHeight:24}},{content:"",styles:{minCellHeight:24}}],
+            ["NAMA PENUH",formData.nama_penuh_diserah||""],
+            ["TARIKH",formData.tarikh_diserah||""],
+            ["NO. TELEFON",formData.no_tel_diserah||""]],
+      didDrawCell:(data)=>{
+        if(formData.tandatangan_diserah&&data.section==="body"&&data.column.index===1&&data.row.index===0){
+          const c=data.cell; doc.addImage(formData.tandatangan_diserah,"PNG",c.x+2,c.y+2,c.width-4,c.height-4);
+        }
+      }});
+  }
   doc.addPage(); doc.setTextColor(0,0,0); doc.setDrawColor(0,0,0);
   doc.setFontSize(9); doc.setFont("helvetica","bold");
   doc.text("D.    PENGESAHAN AKUAN SUMPAH (Hanya untuk terimaan melebihi RM 200,000)", m, 20);
@@ -201,6 +215,30 @@ function generateBaucerBayaranPdf(formData, _rows, sig) {
     body:[[{content:"BAYARAN DILULUSKAN OLEH:\n\n\n......................................................",styles:{fontStyle:"bold",minCellHeight:20}},
            {content:"CEK DITANDANGANI OLEH:\n\n\n......................................................",styles:{fontStyle:"bold",minCellHeight:20}}]],
     columnStyles:{0:{cellWidth:tw/2},1:{cellWidth:tw/2}}});
+  // Reviewer sign-off (config.reviewerSection, kind "choice") — only rendered
+  // for whichever box(es) the reviewer actually picked and signed at approval.
+  {
+    const reviewerBoxes = [
+      { label: "Baucer Disediakan Oleh (Disahkan)", sigKey: "sig_baucer_disediakan" },
+      { label: "Bayaran Diluluskan Oleh",            sigKey: "sig_bayaran_diluluskan" },
+      { label: "Cek Ditandatangani Oleh",            sigKey: "sig_cek_ditandatangani" },
+    ].filter(b => formData[b.sigKey]);
+    if (reviewerBoxes.length) {
+      y=doc.lastAutoTable.finalY+4;
+      doc.setFontSize(9); doc.setFont("helvetica","bold"); doc.setTextColor(0,0,0);
+      doc.text("PENGESAHAN (DISERAHKAN OLEH)", m, y); y+=2;
+      const cw = tw / reviewerBoxes.length;
+      autoTable(doc,{startY:y,margin:{left:m,right:m},theme:"plain",styles:{fontSize:9,textColor:[0,0,0]},
+        body:[reviewerBoxes.map(b=>({content:`${b.label}:\n\n\n\n`,styles:{fontStyle:"bold",minCellHeight:34}}))],
+        columnStyles:Object.fromEntries(reviewerBoxes.map((_,i)=>[i,{cellWidth:cw}])),
+        didDrawCell:(data)=>{
+          const b = reviewerBoxes[data.column.index];
+          if (b && data.section==="body") {
+            const c=data.cell; doc.addImage(formData[b.sigKey],"PNG",c.x+2,c.y+7,Math.min(c.width-4,45),c.height-9);
+          }
+        }});
+    }
+  }
   addFooter(doc,"B.HEP.BAPP(UA).02.01/04(04)","1 Oktober 2020");
   return doc;
 }
@@ -636,257 +674,9 @@ const statusBadge=(s)=>{
   return `${b} bg-amber-100 text-amber-700`;
 };
 const typeLabel=(t)=>t==="income"?"Pendapatan":"Perbelanjaan";
+const SUBMIT_TO_LABELS = { bendahari_kelab: "Bendahari Kelab", advisor: "Penasihat Kelab", pegawai: "Pegawai" };
 const emptyRowFor=(config)=>{ const r={}; config.rowColumns.forEach(c=>{r[c.key]=""}); return r; };
 const initialRowsFor=(config)=> config.rowColumns ? Array.from({length: config.fixedRowCount || 1}, () => emptyRowFor(config)) : [];
-
-// ─── Image signature modal: upload → auto background removal → auto crop ─────
-function removeBackground(ctx, w, h, threshold = 200) {
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const d = imgData.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const lum = d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114;
-    if (lum > threshold) { d[i+3] = 0; }
-    else { d[i] = 0; d[i+1] = 0; d[i+2] = 0; }
-  }
-  ctx.putImageData(imgData, 0, 0);
-}
-
-function findBounds(ctx, w, h) {
-  const d = ctx.getImageData(0, 0, w, h).data;
-  let minX = w, maxX = 0, minY = h, maxY = 0, found = false;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (d[(y * w + x) * 4 + 3] > 10) {
-        if (x < minX) minX = x; if (x > maxX) maxX = x;
-        if (y < minY) minY = y; if (y > maxY) maxY = y;
-        found = true;
-      }
-    }
-  }
-  return found ? { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 } : null;
-}
-
-function ImageSigModal({ uid, onUse, onCancel, onRefresh }) {
-  const [imgSrc, setImgSrc]       = useState(null);
-  const [threshold, setThreshold] = useState(200);
-  const [preview, setPreview]     = useState(null);
-  const [processing, setProcessing] = useState(false);
-  const [saving, setSaving]       = useState(false);
-
-  const processImage = (src, thresh) => {
-    setProcessing(true);
-    const img = new Image();
-    img.onload = () => {
-      // Draw full image, remove background, find signature bounds
-      const tmp = document.createElement("canvas");
-      tmp.width = img.width; tmp.height = img.height;
-      const tctx = tmp.getContext("2d");
-      tctx.drawImage(img, 0, 0);
-      removeBackground(tctx, img.width, img.height, thresh);
-      const bounds = findBounds(tctx, img.width, img.height);
-
-      const OUT_W = 800, OUT_H = 200;
-      const out = document.createElement("canvas");
-      out.width = OUT_W; out.height = OUT_H;
-      const octx = out.getContext("2d");
-
-      if (bounds) {
-        // Add 5% padding around detected signature
-        const pad = Math.round(Math.min(bounds.w, bounds.h) * 0.05);
-        const sx = Math.max(0, bounds.x - pad);
-        const sy = Math.max(0, bounds.y - pad);
-        const sw = Math.min(img.width - sx, bounds.w + pad * 2);
-        const sh = Math.min(img.height - sy, bounds.h + pad * 2);
-        // Fit within output canvas preserving aspect ratio (no stretch)
-        const scale = Math.min(OUT_W / sw, OUT_H / sh);
-        const dw = sw * scale, dh = sh * scale;
-        octx.drawImage(tmp, sx, sy, sw, sh, (OUT_W - dw) / 2, (OUT_H - dh) / 2, dw, dh);
-      } else {
-        // Nothing detected — fit entire image
-        const scale = Math.min(OUT_W / img.width, OUT_H / img.height);
-        const dw = img.width * scale, dh = img.height * scale;
-        octx.drawImage(tmp, 0, 0, img.width, img.height, (OUT_W - dw) / 2, (OUT_H - dh) / 2, dw, dh);
-      }
-      setPreview(out.toDataURL("image/png"));
-      setProcessing(false);
-    };
-    img.src = src;
-  };
-
-  const handleFile = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setImgSrc(ev.target.result);
-      setPreview(null);
-      processImage(ev.target.result, threshold);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleUse = async (saveSlot) => {
-    if (!preview) return;
-    if (saveSlot && uid) {
-      setSaving(true);
-      try { await saveSignature(uid, saveSlot, preview); await onRefresh(); } catch {}
-      finally { setSaving(false); }
-    }
-    onUse(preview);
-  };
-
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4">
-      <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl overflow-y-auto max-h-[92vh]">
-        <div className="border-b border-gray-100 px-6 py-4 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-bold text-gray-900">Upload Imej Tandatangan</h3>
-            <p className="text-xs text-gray-500 mt-0.5">Latar belakang dibuang &amp; kawasan tandatangan dikesan secara automatik.</p>
-          </div>
-          <button onClick={onCancel} className="rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700">✕</button>
-        </div>
-
-        <div className="px-6 py-5 space-y-5">
-          {/* File picker — always visible so user can swap image */}
-          <label className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 py-8 cursor-pointer hover:border-red-400 hover:bg-red-50 transition">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-9 w-9 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-            <p className="text-sm font-medium text-gray-500">{imgSrc ? "Klik untuk tukar imej" : "Klik untuk pilih imej tandatangan"}</p>
-            <p className="text-xs text-gray-400">PNG, JPG, WEBP — latar putih atau berwarna diterima</p>
-            <input type="file" accept="image/*" className="hidden" onChange={handleFile} />
-          </label>
-
-          {imgSrc && (
-            <>
-              {/* Threshold slider + regenerate */}
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-600">
-                  Kepekaan buang latar: <span className="font-bold text-red-700">{threshold}</span>
-                  <span className="ml-1 font-normal text-gray-400">(lebih tinggi = lebih banyak warna dibuang)</span>
-                </label>
-                <div className="flex items-center gap-3">
-                  <input type="range" min={50} max={240} value={threshold} onChange={e => setThreshold(Number(e.target.value))} className="flex-1 accent-red-800" />
-                  <button onClick={() => processImage(imgSrc, threshold)} disabled={processing} className="shrink-0 rounded-xl bg-red-900 px-4 py-2 text-xs font-semibold text-white hover:bg-red-800 disabled:opacity-60 transition">
-                    {processing ? "Memproses..." : "Jana Semula"}
-                  </button>
-                </div>
-              </div>
-
-              {/* Processing state */}
-              {processing && (
-                <div className="flex h-20 items-center justify-center rounded-xl border border-gray-200 bg-gray-50">
-                  <p className="text-xs text-gray-400">Memproses imej...</p>
-                </div>
-              )}
-
-              {/* Preview */}
-              {preview && !processing && (
-                <div className="space-y-3">
-                  <p className="text-xs font-semibold text-gray-600">Pratonton tandatangan (latar telus):</p>
-                  <div className="flex h-20 w-full items-center justify-center rounded-xl border border-gray-200 bg-[repeating-conic-gradient(#e5e7eb_0%_25%,#f9fafb_0%_50%)] bg-[length:16px_16px] p-2">
-                    <img src={preview} alt="Preview tandatangan" className="max-h-full max-w-full object-contain" />
-                  </div>
-                  <p className="text-xs font-semibold text-gray-600">Simpan / guna tandatangan ini:</p>
-                  <div className="flex flex-wrap gap-2">
-                    <button onClick={() => handleUse(1)} disabled={saving} className="rounded-lg bg-red-900 px-4 py-2 text-xs font-semibold text-white hover:bg-red-800 disabled:opacity-60 transition">
-                      {saving ? "Menyimpan..." : "Simpan & Guna"}
-                    </button>
-                    <button onClick={() => handleUse(null)} className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 transition">
-                      Guna Tanpa Simpan
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        <div className="flex justify-end rounded-b-2xl border-t border-gray-100 bg-gray-50 px-6 py-4">
-          <button onClick={onCancel} className="rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-100 transition">Batal</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Signature panel (inline inside form modal) ───────────────────────────────
-function SignaturePanel({ savedSignatures = [], uid, activeSig, onActiveSig, onRefresh }) {
-  const [deleting, setDeleting]         = useState(null);
-  const [showImgModal, setShowImgModal] = useState(false);
-
-  const handleDelete = async (slot) => {
-    setDeleting(slot);
-    try { await deleteSignature(uid, slot); await onRefresh(); } catch (e) { console.error(e); }
-    finally { setDeleting(null); }
-  };
-
-  const slot1 = savedSignatures.find((s) => s.slot === 1);
-  const sigSrc = (data) => data?.url ?? data?.dataUrl ?? null;
-
-  return (
-    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Tandatangan untuk PDF</p>
-        {activeSig && <span className="text-xs font-semibold text-green-600">✓ Tandatangan dipilih</span>}
-      </div>
-
-      {/* Active signature preview */}
-      {activeSig && (
-        <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
-          <img src={activeSig} alt="Tandatangan aktif" className="h-10 w-24 shrink-0 rounded border border-white bg-white object-contain p-0.5" />
-          <p className="flex-1 text-xs text-green-700">Akan digunakan semasa Muat Turun PDF</p>
-          <button onClick={() => onActiveSig(null)} className="shrink-0 text-xs text-red-500 underline hover:text-red-700">Tukar</button>
-        </div>
-      )}
-
-      {/* Single saved slot */}
-      <div className={`flex flex-col items-center gap-2 rounded-lg border p-2 ${slot1 ? "border-gray-200 bg-white" : "border-dashed border-gray-200"}`}>
-        <p className="text-xs font-semibold text-gray-500">Tandatangan Tersimpan</p>
-        <div className="flex h-12 w-full items-center justify-center rounded border border-gray-100 bg-gray-50">
-          {slot1 ? <img src={sigSrc(slot1)} alt="Tandatangan" className="h-full w-full object-contain p-1" /> : <span className="text-xs text-gray-300">Kosong</span>}
-        </div>
-        <div className="flex gap-1.5">
-          {slot1 ? (
-            <>
-              <button
-                onClick={() => onActiveSig(activeSig === sigSrc(slot1) ? null : sigSrc(slot1))}
-                className={`rounded px-2 py-1 text-xs font-semibold transition ${activeSig === sigSrc(slot1) ? "bg-green-600 text-white" : "bg-red-900 text-white hover:bg-red-800"}`}
-              >
-                {activeSig === sigSrc(slot1) ? "✓ Dipilih" : "Guna"}
-              </button>
-              <button onClick={() => setShowImgModal(true)} className="rounded border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-500 hover:bg-gray-100 transition">
-                Tukar
-              </button>
-              <button onClick={() => handleDelete(1)} disabled={deleting === 1} className="rounded border border-red-200 bg-white px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50 transition">
-                {deleting === 1 ? "..." : "Padam"}
-              </button>
-            </>
-          ) : (
-            <button onClick={() => setShowImgModal(true)} className="rounded border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-500 hover:bg-gray-100 transition">
-              Tambah
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Upload button */}
-      {!slot1 && (
-        <button onClick={() => setShowImgModal(true)} className="w-full rounded-lg border border-dashed border-blue-200 py-2 text-xs font-medium text-blue-600 transition hover:border-blue-400 hover:bg-blue-50">
-          + Upload Imej Tandatangan
-        </button>
-      )}
-
-      {/* Image upload modal */}
-      {showImgModal && (
-        <ImageSigModal
-          uid={uid}
-          onUse={(dataUrl) => { onActiveSig(dataUrl); setShowImgModal(false); }}
-          onCancel={() => setShowImgModal(false)}
-          onRefresh={onRefresh}
-        />
-      )}
-    </div>
-  );
-}
 
 // ─── Address widget ───────────────────────────────────────────────────────────
 function AddressField({ formData, onMultiChange, fieldClass, uid }) {
@@ -979,19 +769,6 @@ function AddressField({ formData, onMultiChange, fieldClass, uid }) {
     </div>
   );
 }
-
-// Converts a storage URL to a base64 dataUrl so jsPDF can embed it
-async function resolveToDataUrl(sig) {
-  if (!sig || sig.startsWith("data:")) return sig;
-  const resp = await fetch(sig);
-  const blob = await resp.blob();
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target.result);
-    reader.readAsDataURL(blob);
-  });
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function ReportPage({ tab: forcedTab }) {
   const navigate = useNavigate();
@@ -1050,7 +827,6 @@ export default function ReportPage({ tab: forcedTab }) {
   const [formData, setFormData]             = useState({});
   const [rows, setRows]                     = useState([]);
   const [submitting, setSubmitting]         = useState(false);
-  const [pdfSubmitting, setPdfSubmitting]   = useState(false);
   const [formMsg, setFormMsg]               = useState({ type:"", text:"" });
   const [submissions, setSubmissions]       = useState([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
@@ -1059,6 +835,8 @@ export default function ReportPage({ tab: forcedTab }) {
   const [showDrafts, setShowDrafts]         = useState(false);
   // e-signature (inline panel in form)
   const [activeSig, setActiveSig]           = useState(null);
+  // Destination choice for forms with config.allowSubmitToChoice: null | "advisor" | "pegawai"
+  const [submitTo, setSubmitTo]             = useState(null);
   // cellPopout: { ri, key, label, placeholder, tempValue }
   const [cellPopout, setCellPopout]         = useState(null);
   // suratKelulusan: null | { uploading:bool, name:str, url:str|null, path:str }
@@ -1068,9 +846,18 @@ export default function ReportPage({ tab: forcedTab }) {
   const [mandatoryFiles, setMandatoryFiles] = useState({});
   // Prompt shown when starting a "new" form that already has an unfinished draft: { config }
   const [existingDraftPrompt, setExistingDraftPrompt] = useState(null);
+  // Muat Naik PDF Terus — direct raw-PDF upload bypassing the digital form
+  const [directFormType, setDirectFormType]   = useState("");
+  const [directFile, setDirectFile]           = useState(null);
+  const [directSubmitTo, setDirectSubmitTo]   = useState(null);
+  const [directSubmitting, setDirectSubmitting] = useState(false);
+  const [directMsg, setDirectMsg]             = useState({ type:"", text:"" });
   // Row confirm/remove popups: { type:"confirm"|"remove", ri, label }
   const [confirmRowAction, setConfirmRowAction] = useState(null);
   const [rowActionSuccess, setRowActionSuccess] = useState("");
+  // Confirmation popups shown before actually submitting (digital form / direct PDF upload)
+  const [confirmSubmitBorang, setConfirmSubmitBorang] = useState(false);
+  const [confirmDirectSubmit, setConfirmDirectSubmit] = useState(false);
 
   useEffect(() => {
     if (!currentUser?.uid) return;
@@ -1098,6 +885,46 @@ export default function ReportPage({ tab: forcedTab }) {
     if (activeTab === "borang" && userRole === "treasurer") { loadSubmissions(); refreshDraftList(); }
   }, [activeTab, currentUser?.uid]);
 
+  // Form 8 (Penyata Kewangan + Senarai Resit): Wang Masuk / Wang Keluar totals and the
+  // Senarai Resit Bayaran rows are derived live from the treasurer's own recorded
+  // transactions for this programme, not typed in manually — refresh them on open.
+  useEffect(() => {
+    const cfg = FORMS_CONFIG.find(f => f.id === openFormId);
+    if (!cfg?.rowsAutoFromTransactions || !currentUser?.uid) return;
+    (async () => {
+      try {
+        const txns = await getTransactionsByUser(currentUser.uid, progContext?.code);
+        const income  = txns.filter(t => t.type === "income");
+        const expense = txns.filter(t => t.type === "expense");
+        const sumBy = (list, cats) => list.filter(t => cats.includes(t.category)).reduce((s,t)=>s+Number(t.amount||0),0);
+        setFormData(prev => ({
+          ...prev,
+          peruntukan_hepa_baki: sumBy(income, ["Peruntukan HEP"]).toFixed(2),
+          tabung_persatuan:     sumBy(income, ["Tabung Persatuan"]).toFixed(2),
+          yuran_penyertaan:     sumBy(income, ["Yuran Penyertaan"]).toFixed(2),
+          penajaan:             sumBy(income, ["Penajaan"]).toFixed(2),
+          sumbangan_lain:       sumBy(income, ["Sumbangan", "Lain-lain"]).toFixed(2),
+          makan_minum:          sumBy(expense, ["Makan/Minum"]).toFixed(2),
+          peralatan:            sumBy(expense, ["Peralatan"]).toFixed(2),
+          pengangkutan:         sumBy(expense, ["Pengangkutan"]).toFixed(2),
+          perhubungan:          sumBy(expense, ["Perhubungan"]).toFixed(2),
+          cenderamata:          sumBy(expense, ["Cenderamata"]).toFixed(2),
+          alat_tulis:           sumBy(expense, ["Alat Tulis", "Lain-lain"]).toFixed(2),
+        }));
+        setRows(expense
+          .slice()
+          .sort((a,b)=>(a.date||"").localeCompare(b.date||""))
+          .map(t => ({
+            tarikh_resit:     t.date || "",
+            perkara:          t.category || "",
+            no_resit:         (t.receipts||[]).map(r=>r.noResit).filter(Boolean).join(", "),
+            jumlah:           t.amount != null ? Number(t.amount).toFixed(2) : "",
+            tujuan_pembelian: t.description || "",
+          })));
+      } catch (e) { console.error(e); }
+    })();
+  }, [openFormId, currentUser?.uid, progContext?.code]);
+
   const summary = useMemo(() => {
     const ti = records.filter(i=>i.type==="income").reduce((s,i)=>s+Number(i.amount||0),0);
     const te = records.filter(i=>i.type==="expense").reduce((s,i)=>s+Number(i.amount||0),0);
@@ -1112,6 +939,7 @@ export default function ReportPage({ tab: forcedTab }) {
         role: userRole,
         uid: currentUser.uid,
         club: userProfile?.club,
+        clubs: userProfile?.clubs,
         startDate: isFullProgramme ? "" : startDate,
         endDate:   isFullProgramme ? "" : endDate,
         programmeCode: userRole === "treasurer" ? progContext?.code : undefined,
@@ -1162,11 +990,11 @@ export default function ReportPage({ tab: forcedTab }) {
       setRows(initialRowsFor(config));
       setHasDraft(false);
     }
-    setOpenFormId(config.id); setFormMsg({type:"",text:""});
+    setOpenFormId(config.id); setFormMsg({type:"",text:""}); setSubmitTo(null);
     if (!loadDraftIfExists) { setActiveSig(null); setSuratKelulusan(null); setMandatoryFiles({}); }
   };
 
-  const closeForm = () => { setOpenFormId(null); setFormData({}); setRows([]); setFormMsg({type:"",text:""}); setHasDraft(false); setActiveSig(null); setSuratKelulusan(null); setMandatoryFiles({}); };
+  const closeForm = () => { setOpenFormId(null); setFormData({}); setRows([]); setFormMsg({type:"",text:""}); setHasDraft(false); setActiveSig(null); setSuratKelulusan(null); setMandatoryFiles({}); setSubmitTo(null); };
 
   // "Isi Borang Baru" click — warn first if an unfinished draft for this exact form already exists,
   // since opening fresh would otherwise silently overwrite it on the next keystroke.
@@ -1299,7 +1127,10 @@ export default function ReportPage({ tab: forcedTab }) {
     if (needsSig && !activeSig) {
       return "Sila pilih atau lukis tandatangan di bahagian 'Disediakan Oleh' sebelum menghantar.";
     }
-    if (config?.rowColumnsAllRequired && config.rowColumns && rows.length > 0) {
+    if (config?.allowSubmitToChoice && !submitTo) {
+      return "Sila pilih ke mana borang ini hendak dihantar.";
+    }
+    if (config?.rowColumnsAllRequired && config.rowColumns && rows.length > 0 && !config.rowsAutoFromTransactions) {
       let hasCompleteRow = false;
       for (const row of rows) {
         const allFilled = config.rowColumns.every(col => row[col.key]?.toString().trim());
@@ -1348,7 +1179,16 @@ export default function ReportPage({ tab: forcedTab }) {
     return payload;
   };
 
+  // Validate first so the confirm popup never shows on top of an already-invalid form.
+  const handleRequestSubmitBorang = () => {
+    const config = FORMS_CONFIG.find(f=>f.id===openFormId);
+    const validationError = validateSubmission(config);
+    if (validationError) { setFormMsg({type:"error",text:validationError}); return; }
+    setConfirmSubmitBorang(true);
+  };
+
   const handleSubmitBorang = async () => {
+    setConfirmSubmitBorang(false);
     const config=FORMS_CONFIG.find(f=>f.id===openFormId);
     const validationError = validateSubmission(config);
     if (validationError) { setFormMsg({type:"error",text:validationError}); return; }
@@ -1365,16 +1205,23 @@ export default function ReportPage({ tab: forcedTab }) {
       localStorage.setItem(`sfms_last_form_${currentUser?.uid}`, String(Date.now()));
       const createdByClub = localStorage.getItem(`sfms_club_${currentUser.uid}`) || "";
       const finalFormData = buildSubmissionFormData(formData, config);
+      const needsSig = config?.sections?.some(s=>s.fields?.some(f=>f.type==="signature"));
+      // Persisted (not just used ephemerally for the live PDF preview) so a
+      // complete PDF — including this signature — can be regenerated later,
+      // e.g. once a reviewer has approved and added their own section.
+      const submitterSignature = needsSig ? await resolveToDataUrl(activeSig) : null;
       await submitBorang({
         formType:config.id, formName:config.title, formData:finalFormData, ...(config.rowColumns?{rows}:{}),
         createdBy:currentUser.uid, createdByEmail:currentUser.email, createdByClub,
         suratKelulusanUrl:suratKelulusan?.url ?? null, suratKelulusanName:suratKelulusan?.name ?? null,
+        submitterSignature,
+        ...(config.allowSubmitToChoice ? { submitTo } : {}),
         ...mandatoryAttachmentPayload(config),
       });
       clearDraft(config.id,currentUser.uid); refreshDraftList();
-      setFormMsg({type:"success",text:"Borang berjaya dihantar untuk kelulusan penasihat."});
+      setFormMsg({type:"success",text:"Borang berjaya dihantar untuk kelulusan."});
       await loadSubmissions(); setTimeout(closeForm,1800);
-    } catch { setFormMsg({type:"error",text:"Gagal menghantar borang. Sila cuba lagi."}); }
+    } catch (e) { console.error(e); setFormMsg({type:"error",text:`Gagal menghantar borang. ${e?.code ?? e?.message ?? "Sila cuba lagi."}`}); }
     finally { setSubmitting(false); }
   };
 
@@ -1391,32 +1238,56 @@ export default function ReportPage({ tab: forcedTab }) {
     openPdf(doc, filename);
   };
 
-  const handleHantarPdf = async () => {
-    const genFn = openFormId ? PDF_GENERATORS[openFormId] : null;
-    if (!genFn) return;
-    const cfg = FORMS_CONFIG.find(f => f.id === openFormId);
+  // Once a submission has been approved, the reviewer may have added their
+  // own section/signature (config.reviewerSection) — regenerate the PDF with
+  // that data merged in so the treasurer can download the complete, final version.
+  const handleDownloadUpdatedPdf = async (sub) => {
+    const genFn = PDF_GENERATORS[sub.formType];
+    const cfg = FORMS_CONFIG.find(f => f.id === sub.formType);
+    if (!genFn || !cfg) return;
+    const mergedData = { ...sub.formData, ...(sub.reviewerData ?? {}) };
+    const doc = genFn(mergedData, sub.rows, sub.submitterSignature ?? null);
+    if (!doc) return;
+    const titleSlug = cfg.title.replace(/[^a-zA-Z0-9\s]/g,"").trim().replace(/\s+/g,"-").toLowerCase();
+    openPdf(doc, `${titleSlug}-kemaskini.pdf`);
+  };
+
+  const handleRequestDirectPdfSubmit = () => {
+    if (!directFormType) { setDirectMsg({type:"error",text:"Sila pilih jenis borang."}); return; }
+    if (!directFile) { setDirectMsg({type:"error",text:"Sila muat naik fail PDF."}); return; }
+    if (!directSubmitTo) { setDirectMsg({type:"error",text:"Sila pilih ke mana borang ini hendak dihantar."}); return; }
+    setConfirmDirectSubmit(true);
+  };
+
+  // Muat Naik PDF Terus — bendahari uploads a pre-made PDF directly, choosing which
+  // form type it represents and where it should be reviewed, bypassing the digital form.
+  const handleDirectPdfSubmit = async () => {
+    setConfirmDirectSubmit(false);
+    if (!directFormType) { setDirectMsg({type:"error",text:"Sila pilih jenis borang."}); return; }
+    if (!directFile) { setDirectMsg({type:"error",text:"Sila muat naik fail PDF."}); return; }
+    if (!directSubmitTo) { setDirectMsg({type:"error",text:"Sila pilih ke mana borang ini hendak dihantar."}); return; }
+    const cfg = FORMS_CONFIG.find(f => f.id === directFormType);
     if (!cfg) return;
-    const validationError = validateSubmission(cfg);
-    if (validationError) { setFormMsg({type:"error",text:validationError}); return; }
     const lastKey = `sfms_last_form_${currentUser?.uid}`;
     const last = Number(localStorage.getItem(lastKey) || 0);
     const elapsed = Date.now() - last;
     if (elapsed < FORM_COOLDOWN_MS) {
       const wait = Math.ceil((FORM_COOLDOWN_MS - elapsed) / 1000);
-      setFormMsg({type:"error",text:`Sila tunggu ${wait} saat sebelum menghantar borang lagi.`});
+      setDirectMsg({type:"error",text:`Sila tunggu ${wait} saat sebelum menghantar borang lagi.`});
       return;
     }
-    setPdfSubmitting(true); setFormMsg({type:"",text:""});
+    setDirectSubmitting(true); setDirectMsg({type:"",text:""});
     localStorage.setItem(lastKey, String(Date.now()));
     try {
-      const sig = await resolveToDataUrl(activeSig);
-      const doc = genFn(buildSubmissionFormData(formData, cfg), rows, sig);
-      const blob = getPdfBlob(doc);
       const createdByClub = localStorage.getItem(`sfms_club_${currentUser.uid}`) || "";
-      await submitPdfBorang(currentUser.uid, currentUser.email, createdByClub, cfg.id, cfg.title, blob, mandatoryAttachmentPayload(cfg));
-      setFormMsg({type:"success",text:"PDF berjaya dihantar kepada pihak berkenaan."});
-    } catch { setFormMsg({type:"error",text:"Gagal menghantar PDF. Sila cuba lagi."}); }
-    finally { setPdfSubmitting(false); }
+      await submitPdfBorang(currentUser.uid, currentUser.email, createdByClub, cfg.id, cfg.title, directFile, {
+        submitTo: directSubmitTo,
+        directUpload: true,
+      });
+      setDirectMsg({type:"success",text:"PDF berjaya dihantar kepada pihak berkenaan."});
+      setDirectFormType(""); setDirectFile(null); setDirectSubmitTo(null);
+    } catch (e) { console.error(e); setDirectMsg({type:"error",text:`Gagal menghantar PDF. ${e?.code ?? e?.message ?? "Sila cuba lagi."}`}); }
+    finally { setDirectSubmitting(false); }
   };
 
   const inputClass = "w-full rounded-xl border border-gray-200 px-4 py-3 text-sm outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100";
@@ -1644,6 +1515,74 @@ export default function ReportPage({ tab: forcedTab }) {
               )}
             </div>
 
+            {/* Muat Naik PDF Terus — upload a pre-made PDF directly instead of filling the digital form */}
+            <div className="rounded-2xl border border-blue-200 bg-white p-6 shadow-sm">
+              <h2 className="text-sm font-semibold text-blue-900">Muat Naik PDF Terus</h2>
+              <p className="mt-0.5 mb-4 text-xs text-blue-600">
+                Sudah ada borang PDF siap diisi? Muat naik terus di sini tanpa perlu mengisi borang digital.
+              </p>
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-gray-700">1. Jenis Borang</label>
+                  <select
+                    value={directFormType}
+                    onChange={e => { setDirectFormType(e.target.value); setDirectSubmitTo(null); setDirectMsg({type:"",text:""}); }}
+                    className={inputClass}
+                  >
+                    <option value="">— Pilih jenis borang —</option>
+                    {FORMS_CONFIG.map((config, idx) => (
+                      <option key={config.id} value={config.id}>{idx+1}. {config.title}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-gray-700">2. Muat Naik Fail PDF</label>
+                  {directFile ? (
+                    <div className="flex items-center gap-3">
+                      <span className="flex-1 truncate rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-medium text-green-700">✓ {directFile.name}</span>
+                      <button type="button" onClick={() => setDirectFile(null)} className="shrink-0 rounded-lg border border-red-200 bg-white px-2.5 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50">✕</button>
+                    </div>
+                  ) : (
+                    <label className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-blue-300 bg-blue-50 px-4 py-3 text-xs font-semibold text-blue-700 transition hover:bg-blue-100">
+                      ↑ Pilih Fail PDF
+                      <input type="file" accept="application/pdf" className="hidden" onChange={e=>{ if(e.target.files[0]) { setDirectFile(e.target.files[0]); setDirectMsg({type:"",text:""}); } }} />
+                    </label>
+                  )}
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-gray-700">3. Hantar Kepada</label>
+                  <div className="flex gap-3">
+                    {(FORMS_CONFIG.find(f => f.id === directFormType)?.submitToOptions ?? ["advisor","pegawai"]).map(value => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setDirectSubmitTo(value)}
+                        className={`flex-1 rounded-lg border-2 px-4 py-2.5 text-sm font-semibold transition ${directSubmitTo===value ? "border-blue-600 bg-blue-600 text-white" : "border-blue-200 bg-white text-blue-700 hover:bg-blue-50"}`}
+                      >
+                        {directSubmitTo===value ? "✓ " : ""}{SUBMIT_TO_LABELS[value]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {directMsg.text && (
+                  <div className={`rounded-xl border px-4 py-3 text-sm ${directMsg.type==="success"?"border-green-200 bg-green-50 text-green-700":"border-red-200 bg-red-50 text-red-700"}`}>
+                    {directMsg.text}
+                  </div>
+                )}
+
+                <button
+                  onClick={handleRequestDirectPdfSubmit}
+                  disabled={directSubmitting}
+                  className="w-full rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {directSubmitting ? "Menghantar..." : "Hantar PDF"}
+                </button>
+              </div>
+            </div>
+
             {/* Form cards */}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {FORMS_CONFIG.map((config, idx) => (
@@ -1682,6 +1621,7 @@ export default function ReportPage({ tab: forcedTab }) {
                         <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Tarikh Hantar</th>
                         <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Status</th>
                         <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Disemak Oleh</th>
+                        <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Tindakan</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-red-50">
@@ -1691,6 +1631,13 @@ export default function ReportPage({ tab: forcedTab }) {
                           <td className="px-4 py-3 text-sm text-gray-500">{sub.createdAt?.toDate?sub.createdAt.toDate().toLocaleDateString("ms-MY"):"—"}</td>
                           <td className="px-4 py-3"><span className={statusBadge(sub.status)}>{statusLabel(sub.status)}</span></td>
                           <td className="px-4 py-3 text-sm text-gray-500">{sub.reviewedByEmail||<span className="text-gray-400">—</span>}</td>
+                          <td className="px-4 py-3">
+                            {sub.status === "diluluskan" && PDF_GENERATORS[sub.formType] ? (
+                              <button onClick={() => handleDownloadUpdatedPdf(sub)} className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-green-700">
+                                Muat Turun PDF Kemaskini
+                              </button>
+                            ) : <span className="text-gray-300">—</span>}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1847,12 +1794,46 @@ export default function ReportPage({ tab: forcedTab }) {
                                 )}
                                 <div className="mb-2 flex items-center justify-between">
                                   <p className="text-xs text-gray-500">
-                                    {activeFormConfig.fixedRowCount ? `${rows.length} entri (tetap pada ${activeFormConfig.fixedRowCount})` : `${rows.length} entri`}
+                                    {activeFormConfig.rowsAutoFromTransactions
+                                      ? `${rows.length} transaksi perbelanjaan direkodkan`
+                                      : activeFormConfig.fixedRowCount ? `${rows.length} entri (tetap pada ${activeFormConfig.fixedRowCount})` : `${rows.length} entri`}
                                   </p>
-                                  {!activeFormConfig.fixedRowCount && (
+                                  {!activeFormConfig.fixedRowCount && !activeFormConfig.rowsAutoFromTransactions && (
                                     <button type="button" onClick={addRow} className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100">+ Tambah Penyumbang</button>
                                   )}
                                 </div>
+                                {activeFormConfig.rowsAutoFromTransactions ? (
+                                  <div className="overflow-x-auto rounded-xl border border-gray-200">
+                                    <table className="min-w-full text-xs">
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="px-3 py-2 text-left font-semibold text-gray-500">Bil</th>
+                                          {activeFormConfig.rowColumns.map(col=><th key={col.key} className="px-3 py-2 text-left font-semibold text-gray-500">{col.label}</th>)}
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-gray-100">
+                                        {rows.length === 0 ? (
+                                          <tr><td colSpan={activeFormConfig.rowColumns.length+1} className="px-3 py-4 text-center italic text-gray-400">Tiada transaksi perbelanjaan direkodkan untuk program ini.</td></tr>
+                                        ) : rows.map((row,ri)=>(
+                                          <tr key={ri}>
+                                            <td className="px-3 py-2 font-medium text-gray-500">{ri+1}</td>
+                                            {activeFormConfig.rowColumns.map(col=>(
+                                              <td key={col.key} className="px-3 py-2 text-gray-800">{row[col.key] || <span className="italic text-gray-400">—</span>}</td>
+                                            ))}
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                      {rows.length > 0 && (
+                                        <tfoot>
+                                          <tr className="border-t-2 border-gray-300 bg-gray-50 font-semibold text-gray-800">
+                                            <td className="px-3 py-2 text-right" colSpan={activeFormConfig.rowColumns.length}>Jumlah Keseluruhan (RM)</td>
+                                            <td className="px-3 py-2">RM {rows.reduce((s,r)=>s+Number(r.jumlah||0),0).toFixed(2)}</td>
+                                          </tr>
+                                        </tfoot>
+                                      )}
+                                    </table>
+                                  </div>
+                                ) : (
                                 <div className="overflow-x-auto rounded-xl border border-gray-200">
                                   <table className="min-w-full text-xs">
                                     <thead className="bg-gray-50">
@@ -1897,6 +1878,7 @@ export default function ReportPage({ tab: forcedTab }) {
                                     </tbody>
                                   </table>
                                 </div>
+                                )}
                               </div>
                             ) : (
                               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
@@ -2028,6 +2010,27 @@ export default function ReportPage({ tab: forcedTab }) {
                 );
               })()}
 
+              {/* ── Hantar Kepada (config.allowSubmitToChoice) ── */}
+              {activeFormConfig.allowSubmitToChoice && (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+                  <p className="mb-2 text-xs font-bold uppercase tracking-wider text-indigo-900">
+                    Hantar Kepada <span className="font-bold text-red-600">*</span>
+                  </p>
+                  <div className="flex gap-3">
+                    {(activeFormConfig.submitToOptions ?? ["advisor","pegawai"]).map(value => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setSubmitTo(value)}
+                        className={`flex-1 rounded-lg border-2 px-4 py-2.5 text-sm font-semibold transition ${submitTo===value ? "border-indigo-600 bg-indigo-600 text-white" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-100"}`}
+                      >
+                        {submitTo===value ? "✓ " : ""}{SUBMIT_TO_LABELS[value]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {formMsg.text && (
                 <div className={`rounded-xl border px-4 py-3 text-sm ${formMsg.type==="success"?"border-green-200 bg-green-50 text-green-700":"border-red-200 bg-red-50 text-red-700"}`}>
                   {formMsg.text}
@@ -2036,18 +2039,13 @@ export default function ReportPage({ tab: forcedTab }) {
             </div>
 
             <div className="flex flex-wrap gap-3 rounded-b-2xl border-t border-gray-100 bg-gray-50 px-6 py-4">
-              <button onClick={handleSubmitBorang} disabled={submitting||pdfSubmitting} className="flex-1 rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800 disabled:opacity-60">
+              <button onClick={handleRequestSubmitBorang} disabled={submitting} className="flex-1 rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800 disabled:opacity-60">
                 {submitting?"Menghantar...":"Hantar Borang"}
               </button>
               {hasPdfGen && (
-                <>
-                  <button onClick={handleJanaPdf} disabled={pdfSubmitting} className={`rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${activeSig?"border-green-600 bg-green-600 text-white hover:bg-green-700":"border-green-600 bg-white text-green-700 hover:bg-green-50"} disabled:opacity-60`} title={activeSig?"Muat turun PDF":"Muat turun PDF (tiada tandatangan)"}>
-                    Muat Turun PDF{activeSig ? " ✓" : ""}
-                  </button>
-                  <button onClick={handleHantarPdf} disabled={pdfSubmitting||submitting} className="rounded-xl border border-blue-600 bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60" title="Jana PDF dan hantar kepada pihak berkenaan">
-                    {pdfSubmitting ? "Menghantar PDF..." : "Hantar PDF"}
-                  </button>
-                </>
+                <button onClick={handleJanaPdf} className={`rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${activeSig?"border-green-600 bg-green-600 text-white hover:bg-green-700":"border-green-600 bg-white text-green-700 hover:bg-green-50"}`} title={activeSig?"Muat turun PDF":"Muat turun PDF (tiada tandatangan)"}>
+                  Muat Turun PDF{activeSig ? " ✓" : ""}
+                </button>
               )}
               <button onClick={closeForm} className="rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-100">Batal</button>
             </div>
@@ -2164,6 +2162,52 @@ export default function ReportPage({ tab: forcedTab }) {
               </button>
               <button onClick={() => setExistingDraftPrompt(null)} className="w-full rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50">
                 Batal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirm submit borang ── */}
+      {confirmSubmitBorang && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100">
+              <svg className="h-7 w-7 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+            </div>
+            <h3 className="mb-2 text-base font-bold text-gray-900">Sahkan Penghantaran Borang?</h3>
+            <p className="mb-6 text-sm text-gray-500">
+              Borang <span className="font-semibold text-gray-800">{activeFormConfig?.title}</span> akan dihantar untuk kelulusan. Semak semula sebelum menghantar.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmSubmitBorang(false)} className="flex-1 rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50">Batal</button>
+              <button onClick={handleSubmitBorang} disabled={submitting} className="flex-1 rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800 disabled:opacity-60">
+                {submitting ? "Menghantar..." : "Ya, Hantar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirm direct PDF submit ── */}
+      {confirmDirectSubmit && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100">
+              <svg className="h-7 w-7 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+            </div>
+            <h3 className="mb-2 text-base font-bold text-gray-900">Sahkan Penghantaran PDF?</h3>
+            <p className="mb-6 text-sm text-gray-500">
+              PDF ini akan dihantar kepada <span className="font-semibold text-gray-800">{SUBMIT_TO_LABELS[directSubmitTo]}</span>. Semak semula sebelum menghantar.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmDirectSubmit(false)} className="flex-1 rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50">Batal</button>
+              <button onClick={handleDirectPdfSubmit} disabled={directSubmitting} className="flex-1 rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800 disabled:opacity-60">
+                {directSubmitting ? "Menghantar..." : "Ya, Hantar"}
               </button>
             </div>
           </div>

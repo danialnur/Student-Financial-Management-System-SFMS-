@@ -68,7 +68,7 @@ export default function TreasurerProfilePage() {
     <div className="min-h-screen bg-gray-50">
       <PageHeader
         title="Profil Saya"
-        subtitle={currentUser?.email}
+        subtitle="Kemaskini profil anda"
         action={
           <button
             onClick={() => navigate(-1)}

@@ -82,13 +82,17 @@ export default function AddTransactionPage() {
       e.target.value = "";
       return;
     }
-    setReceiptFiles((prev) => [...prev, ...incoming]);
+    setReceiptFiles((prev) => [...prev, ...incoming.map((file) => ({ file, noResit: "" }))]);
     setErrorMsg("");
     e.target.value = "";
   };
 
   const removeFile = (index) => {
     setReceiptFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleNoResitChange = (index, value) => {
+    setReceiptFiles((prev) => prev.map((rf, i) => (i === index ? { ...rf, noResit: value } : rf)));
   };
 
   const handleSubmit = async (e) => {
@@ -103,6 +107,8 @@ export default function AddTransactionPage() {
       return setErrorMsg("Jumlah mestilah lebih daripada 0.");
     if (form.type === "expense" && receiptFiles.length === 0)
       return setErrorMsg("Sila muat naik sekurang-kurangnya satu resit untuk perbelanjaan.");
+    if (form.type === "expense" && receiptFiles.some((rf) => !rf.noResit.trim()))
+      return setErrorMsg("Sila isi No. Resit untuk setiap resit yang dimuat naik.");
 
     const lastKey = `sfms_last_txn_${currentUser.uid}`;
     const last = Number(localStorage.getItem(lastKey) || 0);
@@ -112,10 +118,20 @@ export default function AddTransactionPage() {
       return setErrorMsg(`Sila tunggu ${wait} saat sebelum menghantar transaksi lagi.`);
     }
 
+    // Always resolve the programme's CURRENT code/name from Firestore before writing —
+    // the cached copy in localStorage can go stale if the programme is renamed later,
+    // which would otherwise silently write transactions under an orphaned programmeCode
+    // that no longer matches what the dashboard/report queries filter by.
+    let liveProgrammeCode = form.programmeCode;
+    let liveProgrammeName = form.programmeName;
     if (programmeId) {
       const prog = await getProgrammeById(programmeId);
       if (prog && prog.treasurerUid && prog.treasurerUid !== currentUser.uid) {
         return setErrorMsg("Anda tidak dibenarkan mengemukakan transaksi untuk program ini. Sila pilih program anda sendiri.");
+      }
+      if (prog) {
+        liveProgrammeCode = prog.code;
+        liveProgrammeName = prog.name;
       }
     }
 
@@ -126,7 +142,7 @@ export default function AddTransactionPage() {
       let receipts = [];
       if (receiptFiles.length) {
         try {
-          receipts = await Promise.all(receiptFiles.map((f) => uploadReceipt(f, currentUser.uid)));
+          receipts = await Promise.all(receiptFiles.map(async (rf) => ({ ...(await uploadReceipt(rf.file, currentUser.uid)), noResit: rf.noResit.trim() })));
         } catch (uploadError) {
           console.error("Upload error:", uploadError);
           const code = uploadError?.code ?? "";
@@ -141,9 +157,12 @@ export default function AddTransactionPage() {
 
       await createTransaction({
         ...form,
+        programmeCode: liveProgrammeCode,
+        programmeName: liveProgrammeName,
         amount: Number(form.amount),
         createdBy: currentUser.uid,
         createdByEmail: currentUser.email,
+        createdByClub: localStorage.getItem(`sfms_club_${currentUser.uid}`) || "",
         receipts,
         receiptUrl:  receipts[0]?.receiptUrl  ?? null,
         receiptPath: receipts[0]?.receiptPath ?? null,
@@ -295,17 +314,26 @@ export default function AddTransactionPage() {
                 />
                 <p className="mt-1 text-xs text-gray-400">Had: 5MB setiap fail · Jenis: JPG, PNG, PDF · Boleh pilih lebih dari satu</p>
                 {receiptFiles.length > 0 && (
-                  <ul className="mt-2 space-y-1">
-                    {receiptFiles.map((f, i) => (
-                      <li key={i} className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-1.5">
-                        <span className="truncate max-w-xs text-xs text-gray-600">{i + 1}. {f.name}</span>
-                        <button
-                          type="button"
-                          onClick={() => removeFile(i)}
-                          className="ml-2 text-xs font-bold text-red-400 hover:text-red-600"
-                        >
-                          ✕
-                        </button>
+                  <ul className="mt-2 space-y-2">
+                    {receiptFiles.map((rf, i) => (
+                      <li key={i} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                        <div className="flex items-center justify-between">
+                          <span className="truncate max-w-xs text-xs text-gray-600">{i + 1}. {rf.file.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeFile(i)}
+                            className="ml-2 text-xs font-bold text-red-400 hover:text-red-600"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                        <input
+                          type="text"
+                          value={rf.noResit}
+                          onChange={(e) => handleNoResitChange(i, e.target.value)}
+                          placeholder="No. Resit (cth. RCP-001)"
+                          className="mt-1.5 w-full rounded-lg border border-gray-200 px-3 py-1.5 text-xs outline-none transition focus:border-red-500 focus:ring-1 focus:ring-red-100"
+                        />
                       </li>
                     ))}
                   </ul>

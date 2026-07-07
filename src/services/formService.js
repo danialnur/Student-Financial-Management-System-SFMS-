@@ -11,14 +11,25 @@ import {
 } from "firebase/firestore";
 import { CLUB_CATEGORIES } from "../config/clubsConfig";
 
-// Forms in this list are routed only to the pegawai in charge of the
-// submitting club's category, not to advisor/bendahari_kelab reviewers.
+// Forms in this list are always ACTIONED by the pegawai in charge of the
+// submitting club's category (regardless of any submitTo choice). Everyone in
+// scope (bendahari_kelab/advisor/pegawai of that club/category) can still see
+// them — see getIntendedReviewerRole.
 export const PEGAWAI_ONLY_FORM_TYPES = ["permohonan-pengecualian-cukai"];
 
 const categoryForClub = (club) => {
   if (!club) return "";
   const entry = Object.entries(CLUB_CATEGORIES).find(([, clubs]) => clubs.includes(club));
   return entry?.[0] ?? "";
+};
+
+// Which role is actually meant to act (fill any reviewer section + approve/
+// reject) on a given submission. Bendahari_kelab/advisor/pegawai in scope can
+// all VIEW every submission in their club/category — this only gates ACTION.
+export const getIntendedReviewerRole = (item) => {
+  if (PEGAWAI_ONLY_FORM_TYPES.includes(item.formType)) return "pegawai";
+  if (item.submitTo) return item.submitTo;
+  return "advisor";
 };
 
 export const submitBorang = async (data) => {
@@ -52,7 +63,8 @@ export const getPendingBorang = async () => {
     .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
 };
 
-// For Bendahari Kelab — only forms from their one club (pegawai-only form types excluded)
+// For Bendahari Kelab — every form submitted within their one club, regardless
+// of who it's addressed to (they can see it and to whom, even if they can't act on it)
 export const getPendingBorangByClub = async (club) => {
   if (!club) return [];
   const q = query(
@@ -63,11 +75,11 @@ export const getPendingBorangByClub = async (club) => {
   const snap = await getDocs(q);
   return snap.docs
     .map((d) => ({ id: d.id, ...d.data() }))
-    .filter((d) => !PEGAWAI_ONLY_FORM_TYPES.includes(d.formType))
     .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
 };
 
-// For Advisor — forms from one or more assigned clubs (pegawai-only form types excluded)
+// For Advisor — every form submitted within one or more assigned clubs,
+// regardless of who it's addressed to
 export const getPendingBorangByClubs = async (clubs) => {
   if (!clubs || clubs.length === 0) return [];
   const results = [];
@@ -84,17 +96,16 @@ export const getPendingBorangByClubs = async (clubs) => {
   const seen = new Set();
   return results
     .filter(d => { if (seen.has(d.id)) return false; seen.add(d.id); return true; })
-    .filter((d) => !PEGAWAI_ONLY_FORM_TYPES.includes(d.formType))
     .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
 };
 
-// For Pegawai — pegawai-only form types (e.g. tax exemption), scoped to their category
-export const getPendingCukaiFormsByCategory = async (category) => {
+// For Pegawai — every form submitted within their division/category,
+// regardless of who it's addressed to
+export const getPendingBorangByCategory = async (category) => {
   if (!category) return [];
   const q = query(
     collection(db, "formSubmissions"),
     where("status", "in", ["menunggu", "disemak"]),
-    where("formType", "in", PEGAWAI_ONLY_FORM_TYPES),
     where("createdByCategory", "==", category)
   );
   const snap = await getDocs(q);

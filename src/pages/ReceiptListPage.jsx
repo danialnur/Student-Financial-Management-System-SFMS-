@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getTransactionsByUser } from "../services/transactionService";
 import { useAuth } from "../context/AuthContext";
@@ -19,6 +19,33 @@ function getReceiptLinks(t) {
   return [];
 }
 
+const XIcon = () => (
+  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+  </svg>
+);
+
+// Clickable sort arrows shown in table header
+function SortArrows({ colKey, sortState, onSort }) {
+  const active = sortState.col === colKey;
+  const dir    = active ? sortState.dir : null;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(colKey)}
+      className="ml-1.5 inline-flex flex-col items-center gap-0.5 align-middle"
+      title="Klik untuk susun"
+    >
+      <svg viewBox="0 0 8 5" className={`h-2 w-2 ${dir === "asc" ? "fill-white" : "fill-red-400"}`}>
+        <path d="M4 0L8 5H0z" />
+      </svg>
+      <svg viewBox="0 0 8 5" className={`h-2 w-2 ${dir === "desc" ? "fill-white" : "fill-red-400"}`}>
+        <path d="M4 5L0 0H8z" />
+      </svg>
+    </button>
+  );
+}
+
 export default function ReceiptListPage() {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
@@ -29,9 +56,17 @@ export default function ReceiptListPage() {
   const [selected, setSelected] = useState(null);
   const [preview, setPreview]   = useState(null);
 
+  // Search + date range + sort
+  const [search, setSearch]       = useState("");
+  const [dateFrom, setDateFrom]   = useState("");
+  const [dateTo, setDateTo]       = useState("");
+  const [sortState, setSortState] = useState({ col: null, dir: null });
+
   useEffect(() => {
     if (!uid) return;
-    getTransactionsByUser(uid)
+    let programmeCode = null;
+    try { programmeCode = JSON.parse(localStorage.getItem(`sfms_prog_${uid}`) || "null")?.code ?? null; } catch {}
+    getTransactionsByUser(uid, programmeCode)
       .then((all) => {
         setItems(
           all.filter(
@@ -42,6 +77,62 @@ export default function ReceiptListPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [uid]);
+
+  // Sort cycle: null → asc → desc → null
+  const handleSort = (col) => {
+    setSortState(prev => {
+      if (prev.col !== col)   return { col, dir: "asc" };
+      if (prev.dir === "asc") return { col, dir: "desc" };
+      return { col: null, dir: null };
+    });
+  };
+
+  const displayedItems = useMemo(() => {
+    const q    = search.trim().toLowerCase();
+    const from = dateFrom ? new Date(dateFrom) : null;
+    const to   = dateTo   ? new Date(dateTo)   : null;
+
+    const filtered = items.filter((t) => {
+      if (q) {
+        const name = (t.programmeName || "").toLowerCase();
+        const cat  = (t.category || "").toLowerCase();
+        if (!name.includes(q) && !cat.includes(q)) return false;
+      }
+      if (from || to) {
+        const d = t.date ? new Date(t.date) : null;
+        if (!d) return false;
+        if (from && d < from) return false;
+        if (to   && d > to)   return false;
+      }
+      return true;
+    });
+
+    const { col, dir } = sortState;
+    if (!col) return filtered;
+
+    return [...filtered].sort((a, b) => {
+      if (col === "tarikh") {
+        const cmp = (a.date || "").localeCompare(b.date || "");
+        return dir === "asc" ? cmp : -cmp;
+      }
+      if (col === "kategori") {
+        const cmp = (a.category || "").localeCompare(b.category || "");
+        return dir === "asc" ? cmp : -cmp;
+      }
+      if (col === "jumlah") {
+        const cmp = Number(a.amount || 0) - Number(b.amount || 0);
+        return dir === "asc" ? cmp : -cmp;
+      }
+      if (col === "fail") {
+        const cmp = getReceiptLinks(a).length - getReceiptLinks(b).length;
+        return dir === "asc" ? cmp : -cmp;
+      }
+      return 0;
+    });
+  }, [items, search, dateFrom, dateTo, sortState]);
+
+  const hasFilters   = search || dateFrom || dateTo;
+  const clearFilters = () => { setSearch(""); setDateFrom(""); setDateTo(""); setSortState({ col: null, dir: null }); };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -71,45 +162,107 @@ export default function ReceiptListPage() {
                 Semua Resit Perbelanjaan ({items.length})
               </p>
             </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead>
-                  <tr className="bg-red-900 text-left">
-                    {["Tarikh", "Program", "Kategori", "Jumlah", "Fail Resit"].map((h) => (
-                      <th key={h} className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-red-50">
-                  {items.map((t) => (
-                    <tr
-                      key={t.id}
-                      onClick={() => setSelected(t)}
-                      className="cursor-pointer transition-colors hover:bg-red-50"
-                    >
-                      <td className="px-4 py-3 text-sm text-gray-700">{t.date}</td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-800">
-                          {t.programmeCode}
-                        </span>
-                        {t.programmeName && (
-                          <p className="mt-0.5 text-xs text-gray-500">{t.programmeName}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-700">{t.category}</td>
-                      <td className="px-4 py-3 text-sm font-semibold text-red-700">
-                        RM {Number(t.amount).toFixed(2)}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-500">
-                        {getReceiptLinks(t).length} fail
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+
+            {/* Search + date range */}
+            <div className="border-b border-gray-100 px-6 py-4 space-y-3">
+              <div className="relative">
+                <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" /></svg>
+                <input
+                  type="text"
+                  placeholder="Cari nama program atau kategori..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 py-2.5 pl-9 pr-9 text-sm outline-none focus:border-red-400 focus:ring-1 focus:ring-red-100"
+                />
+                {search && (
+                  <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"><XIcon /></button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-500">Tarikh Dari</label>
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    max={dateTo || undefined}
+                    onChange={e => setDateFrom(e.target.value)}
+                    className="rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-red-400 focus:ring-1 focus:ring-red-100"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-gray-500">Hingga</label>
+                  <input
+                    type="date"
+                    value={dateTo}
+                    min={dateFrom || undefined}
+                    onChange={e => setDateTo(e.target.value)}
+                    className="rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-red-400 focus:ring-1 focus:ring-red-100"
+                  />
+                </div>
+                {(dateFrom || dateTo) && (
+                  <button onClick={() => { setDateFrom(""); setDateTo(""); }} className="rounded-xl border border-gray-200 px-3 py-2 text-xs text-gray-500 hover:text-red-700 hover:border-red-200 transition">
+                    Kosongkan Tarikh
+                  </button>
+                )}
+              </div>
+
+              {hasFilters && (
+                <div className="flex items-center justify-between text-xs text-gray-500">
+                  <span>
+                    Menunjukkan <strong className="text-gray-800">{displayedItems.length}</strong> daripada{" "}
+                    <strong className="text-gray-800">{items.length}</strong> resit
+                  </span>
+                  <button onClick={clearFilters} className="font-medium text-red-700 hover:underline">
+                    Padam semua
+                  </button>
+                </div>
+              )}
             </div>
+
+            {displayedItems.length === 0 ? (
+              <p className="p-6 text-sm text-gray-500">Tiada resit yang sepadan dengan carian / julat tarikh.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full">
+                  <thead>
+                    <tr className="bg-red-900 text-left">
+                      {[
+                        { label: "Tarikh",     col: "tarikh" },
+                        { label: "Kategori",   col: "kategori" },
+                        { label: "Jumlah",     col: "jumlah" },
+                        { label: "Fail Resit", col: "fail" },
+                      ].map(({ label, col }) => (
+                        <th key={col} className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">
+                          <span className="inline-flex items-center">
+                            {label}
+                            <SortArrows colKey={col} sortState={sortState} onSort={handleSort} />
+                          </span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-red-50">
+                    {displayedItems.map((t) => (
+                      <tr
+                        key={t.id}
+                        onClick={() => setSelected(t)}
+                        className="cursor-pointer transition-colors hover:bg-red-50"
+                      >
+                        <td className="px-4 py-3 text-sm text-gray-700">{t.date}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{t.category}</td>
+                        <td className="px-4 py-3 text-sm font-semibold text-red-700">
+                          RM {Number(t.amount).toFixed(2)}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-500">
+                          {getReceiptLinks(t).length}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -6,6 +6,20 @@ export const FORMS_CONFIG = [
     subtitle: "Borang akuan penerimaan wang tunai untuk program",
     autoFillAkuanWangTunai: true,
     hideSuratKelulusan: true,
+    allowSubmitToChoice: true,
+    // Filled by the reviewer (whoever this was submitted to) at approval time —
+    // distinct from Section C's "Pengesahan" above, which the treasurer fills
+    // at submission time acknowledging receipt of the cash.
+    reviewerSection: {
+      label: "Pengesahan (Diserahkan Oleh)",
+      kind: "fixed",
+      fields: [
+        { key: "tandatangan_diserah", label: "Tandatangan",  type: "signature", required: true },
+        { key: "nama_penuh_diserah",  label: "Nama Penuh",   type: "text",      required: true, autoFillReviewer: "fullName" },
+        { key: "tarikh_diserah",      label: "Tarikh",       type: "date",      required: true, autoFillReviewer: "today" },
+        { key: "no_tel_diserah",      label: "No. Telefon",  type: "text",      required: true, autoFillReviewer: "phone" },
+      ],
+    },
     sections: [
       {
         id: "A",
@@ -71,6 +85,19 @@ export const FORMS_CONFIG = [
       disediakan_nama: "fullName",
       disediakan_tarikh: "today",
     },
+    // Filled by the reviewer at approval time — a separate sign-off chain from
+    // the treasurer's own "Baucer Disediakan Oleh" fields above (Section B).
+    // The reviewer picks whichever of these roles applies to them and signs it.
+    reviewerSection: {
+      label: "Pengesahan",
+      kind: "choice",
+      minSelected: 1,
+      options: [
+        { key: "baucer_disediakan",  label: "Baucer Disediakan Oleh",   fields: [{ key: "sig_baucer_disediakan",  label: "Tandatangan", type: "signature", required: true }] },
+        { key: "bayaran_diluluskan", label: "Bayaran Diluluskan Oleh",  fields: [{ key: "sig_bayaran_diluluskan", label: "Tandatangan", type: "signature", required: true }] },
+        { key: "cek_ditandatangani", label: "Cek Ditandatangani Oleh",  fields: [{ key: "sig_cek_ditandatangani", label: "Tandatangan", type: "signature", required: true }] },
+      ],
+    },
     sections: [
       {
         id: "A",
@@ -126,6 +153,20 @@ export const FORMS_CONFIG = [
     id: "tuntutan-bayaran-balik",
     title: "Tuntutan Bayaran Balik Mendahulukan Wang",
     subtitle: "Borang tuntutan bayaran balik pendahuluan wang",
+    autoFillFields: {
+      nama_penuh: "fullName",
+      no_matrik:  "matricNumber",
+      no_tel:     "phone",
+      tarikh:     "today",
+    },
+    enforceRequiredFields: true,
+    mandatoryAttachments: [
+      { key: "senaraiResitBayaran",       label: "Senarai Resit Bayaran",         hint: "Muat naik senarai resit bayaran. (PDF sahaja)",                      required: true,  maxFiles: 1, accept: "application/pdf" },
+      { key: "resitAsal",                 label: "Resit Asal",                    hint: "Muat naik salinan resit asal. (PDF sahaja, boleh lebih daripada satu)", required: true,  maxFiles: 5, accept: "application/pdf" },
+      { key: "salinanSuratKelulusan",     label: "Salinan Surat Kelulusan",       hint: "Muat naik salinan surat kelulusan program. (PDF sahaja)",           required: true,  maxFiles: 1, accept: "application/pdf" },
+      { key: "borangTukarTarikh",         label: "Borang Tukar Tarikh",           hint: "Muat naik borang tukar tarikh jika berkaitan. (PDF sahaja)",        required: false, maxFiles: 1, accept: "application/pdf" },
+      { key: "tentatifPenyataKewangan",   label: "Tentatif & Penyata Kewangan",   hint: "Muat naik tentatif dan penyata kewangan program. (PDF sahaja)",     required: true,  maxFiles: 2, accept: "application/pdf" },
+    ],
     sections: [
       {
         id: "A",
@@ -139,9 +180,18 @@ export const FORMS_CONFIG = [
       },
       {
         id: "B",
-        label: "Pengakuan Pemohon",
+        label: "Perakuan Bayaran",
         required: true,
         fields: [
+          { key: "perakuan_terma", label: "Perakuan", type: "info", required: false, content: [
+            "Saya mengaku bahawa tuntutan ini adalah benar dan telah membuat bayaran menggunakan wang sendiri.",
+            "Sekiranya tuntutan yang dikemukakan adalah tidak benar dan berlaku penyalahgunaan, saya boleh disiasat dan dikenakan tindakan di bawah Kaedah-kaedah Universiti Teknologi Malaysia (Tatatertib Pelajar-Pelajar) 1999 atau Akta Badan-badan Berkanun (Tertib dan Surcaj) Akta 605.",
+            "Barang/Perkhidmatan telah diterima dengan sempurna mengikut spesifikasi yang ditetapkan.",
+            "Tuntutan ini telah disemak dan belum dibayar.",
+            "Semua Peraturan Universiti telah dipatuhi.",
+          ] },
+          { key: "perakuan_akui", label: "Saya telah membaca dan bersetuju dengan Perakuan Bayaran di atas.", type: "checkbox", required: true },
+          { key: "tandatangan_pemohon", label: "Tandatangan", type: "signature", required: true },
           { key: "nama_penuh", label: "Nama Penuh",  type: "text", required: true, placeholder: "AHMAD BIN HASSAN" },
           { key: "no_matrik",  label: "No. Matrik",  type: "text", required: true, placeholder: "A21EC0001" },
           { key: "no_tel",     label: "No. Tel",     type: "text", required: true, placeholder: "012-3456789" },
@@ -153,6 +203,7 @@ export const FORMS_CONFIG = [
       { key: "nama_pemohon",    label: "Nama Pemohon",                                          type: "text",     required: true, placeholder: "Kelab Komputer UTM" },
       { key: "tujuan_pembelian",label: "Tujuan Pembelian (Nama Program, Tarikh & Tempat)",      type: "textarea", required: true, placeholder: "Pembelian hadiah pemenang, Program Inovasi 2025, 15 Mac 2025, Dewan Canselor UTM" },
       { key: "jumlah_tuntutan", label: "Jumlah Tuntutan (RM)",                                  type: "number",   required: true, placeholder: "450.00" },
+      { key: "perakuan_akui",   label: "Perakuan Bayaran — Pengakuan",                          type: "checkbox", required: true },
       { key: "nama_penuh",      label: "Nama Penuh",                                            type: "text",     required: true, placeholder: "AHMAD BIN HASSAN" },
       { key: "no_matrik",       label: "No. Matrik",                                            type: "text",     required: true, placeholder: "A21EC0001" },
       { key: "no_tel",          label: "No. Tel",                                               type: "text",     required: true, placeholder: "012-3456789" },
@@ -345,8 +396,8 @@ export const FORMS_CONFIG = [
   // ── Form 7: Borang Permohonan Pengecualian Cukai ────────────────────────────
   {
     id: "permohonan-pengecualian-cukai",
-    title: "Borang Permohonan Pengecualian Cukai Subseksyen 44(6)",
-    subtitle: "Borang permohonan pengecualian cukai program",
+    title: "Borang Permohonan Pengecualian Cukai",
+    subtitle: "Borang Permohonan Pengecualian Cukai Subseksyen 44(6)",
     autoFillPemohon: true,
     enforceRequiredFields: true,
     jawatanCombineWithProgram: true,
@@ -421,12 +472,23 @@ export const FORMS_CONFIG = [
     ],
   },
 
-  // ── Form 8: Penyata Kewangan + Senarai Resit-Resit ──────────────────────────
+  // ── Form 8: Penyata Kewangan + Senarai Resit ────────────────────────────────
   {
     id: "penyata-kewangan-resit",
-    title: "Penyata Kewangan + Senarai Resit-Resit",
+    title: "Penyata Kewangan + Senarai Resit",
     subtitle: "Penyata kewangan program dan senarai resit",
     rowColumnsAllRequired: true,
+    rowsAutoFromTransactions: true,
+    hideSuratKelulusan: true,
+    allowSubmitToChoice: true,
+    submitToOptions: ["bendahari_kelab", "advisor", "pegawai"],
+    autoFillFields: {
+      persatuan_kelab:     "club",
+      aktiviti_program:    "program",
+      nama_bendahari:      "fullName",
+      no_telefon_bendahari:"phone",
+      tarikh_penyediaan:   "today",
+    },
     sections: [
       {
         id: "A",
@@ -481,9 +543,10 @@ export const FORMS_CONFIG = [
         label: "Disediakan Oleh",
         required: true,
         fields: [
-          { key: "nama_bendahari",       label: "Nama Bendahari Program", type: "text", required: true, placeholder: "AHMAD BIN HASSAN" },
-          { key: "no_telefon_bendahari", label: "No. Telefon Bendahari",  type: "text", required: true, placeholder: "012-3456789" },
-          { key: "tarikh_penyediaan",    label: "Tarikh Penyediaan",      type: "date", required: true },
+          { key: "tandatangan_penyediaan", label: "Tandatangan",           type: "signature", required: true },
+          { key: "nama_bendahari",         label: "Nama Bendahari Program", type: "text", required: true, placeholder: "AHMAD BIN HASSAN" },
+          { key: "no_telefon_bendahari",   label: "No. Telefon Bendahari",  type: "text", required: true, placeholder: "012-3456789" },
+          { key: "tarikh_penyediaan",      label: "Tarikh Penyediaan",      type: "date", required: true },
         ],
       },
     ],

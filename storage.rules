@@ -1,0 +1,49 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() { return request.auth != null; }
+
+    // Cross-service read of the requester's own Firestore user doc, so Storage
+    // can grant reviewer roles read access to files without duplicating the
+    // whole authorization model here. Requires no extra setup on modern
+    // Firebase projects (Spark plan included).
+    function myRole() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function isReviewer() {
+      return isSignedIn() && myRole() in ['admin', 'bendahari_kelab', 'advisor', 'pegawai'];
+    }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+
+    // Personal transaction receipts — self only, never reviewed by anyone else.
+    match /receipts/{userId}/{fileName} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Signature images — self only. Reviewers never fetch these directly;
+    // signatures are already baked into the generated PDF the treasurer
+    // uploads, so there's no cross-user read need here.
+    match /signatures/{userId}/{fileName} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Supporting documents attached to a form submission — the owning
+    // treasurer plus any reviewer role can read (approving officers need to
+    // open these); only the owner can upload.
+    match /surat_kelulusan/{userId}/{fileName} {
+      allow read: if isOwner(userId) || isReviewer();
+      allow write: if isOwner(userId);
+    }
+
+    match /mandatory_attachments/{attKey}/{userId}/{fileName} {
+      allow read: if isOwner(userId) || isReviewer();
+      allow write: if isOwner(userId);
+    }
+
+    match /pdf_submissions/{formType}/{userId}/{fileName} {
+      allow read: if isOwner(userId) || isReviewer();
+      allow write: if isOwner(userId);
+    }
+  }
+}

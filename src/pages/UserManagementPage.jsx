@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import PageHeader from "../components/PageHeader";
 import { secondaryAuth } from "../firebase/adminAuth";
+import { ALL_CLUBS, CLUB_CATEGORIES } from "../config/clubsConfig";
 import {
   createUserProfile,
   getAllUsers,
@@ -43,7 +44,7 @@ export default function UserManagementPage() {
   const [editCategory, setEditCategory] = useState("");
   const [editSaving, setEditSaving]     = useState(false);
 
-  const PEGAWAI_CATEGORIES = ["AKADEMIK", "BUKAN AKADEMIK", "BADAN BERUNIFORM", "ANAK NEGERI", "AGAMA", "JKM"];
+  const PEGAWAI_CATEGORIES = Object.keys(CLUB_CATEGORIES);
 
   const loadUsers = async () => {
     try { setLoading(true); setErrorMsg(""); setUsers(await getAllUsers()); }
@@ -121,11 +122,14 @@ export default function UserManagementPage() {
     <div className="space-y-2">
       {clubs.map((c, i) => (
         <div key={i} className="flex gap-2 items-center">
-          <input
-            type="text" value={c}
+          <select
+            value={c}
             onChange={e => { const n=[...clubs]; n[i]=e.target.value; onChange(n); }}
-            className={inputCls} placeholder={`Kelab ${i+1}`}
-          />
+            className={inputCls}
+          >
+            <option value="">-- Pilih Kelab {i+1} --</option>
+            {ALL_CLUBS.map(club => <option key={club} value={club}>{club}</option>)}
+          </select>
           {clubs.length > 1 && (
             <button type="button" onClick={() => onChange(clubs.filter((_,j)=>j!==i))} className="shrink-0 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50">
               Buang
@@ -170,7 +174,10 @@ export default function UserManagementPage() {
               </select>
             </div>
             {form.role === "bendahari_kelab" && (
-              <input type="text" name="club" placeholder="Nama kelab (mesti sepadan dengan nama kelab dalam sistem)" value={form.club} onChange={handleChange} className={inputClass} />
+              <select name="club" value={form.club} onChange={handleChange} className={inputClass}>
+                <option value="">-- Pilih Kelab --</option>
+                {ALL_CLUBS.map(club => <option key={club} value={club}>{club}</option>)}
+              </select>
             )}
             {form.role === "advisor" && (
               <div>
@@ -278,7 +285,10 @@ export default function UserManagementPage() {
               {editRole === "bendahari_kelab" && (
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-gray-600">Nama Kelab</label>
-                  <input type="text" value={editClub} onChange={e => setEditClub(e.target.value)} className={inputClass} placeholder="Nama kelab (mesti sepadan)" />
+                  <select value={editClub} onChange={e => setEditClub(e.target.value)} className={inputClass}>
+                    <option value="">-- Pilih Kelab --</option>
+                    {ALL_CLUBS.map(club => <option key={club} value={club}>{club}</option>)}
+                  </select>
                 </div>
               )}
               {editRole === "advisor" && (
