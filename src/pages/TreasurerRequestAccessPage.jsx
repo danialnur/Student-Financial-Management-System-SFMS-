@@ -39,6 +39,8 @@ export default function TreasurerRequestAccessPage() {
         setError("Anda masih mempunyai permohonan yang menunggu kelulusan. Sila tunggu keputusan sebelum menghantar permohonan baharu.");
       } else if (err.message === "MAX_ATTEMPTS_EXCEEDED") {
         setError("Anda telah pernah memohon dan ditolak untuk program ini. Sila hubungi Bendahari Kelab untuk pertimbangan semula.");
+      } else if (err.message === "CANCELLED_BY_SELF") {
+        setError("Anda telah membatalkan permohonan untuk program ini. Sila hubungi Bendahari Kelab untuk membenarkan anda memohon semula.");
       } else {
         setError(`Gagal menghantar permohonan: ${err.message ?? "ralat tidak diketahui"}.`);
       }

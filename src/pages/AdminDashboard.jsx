@@ -1,13 +1,85 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getAdminDashboardSummary } from "../services/dashboardService";
 import PageHeader from "../components/PageHeader";
 
+const ROLE_LABELS = {
+  treasurer:       "Bendahari",
+  advisor:         "Penasihat Kelab",
+  admin:           "Admin",
+  bendahari_kelab: "Bendahari Kelab",
+  pegawai:         "Pegawai Kewangan",
+};
+
+const DETAIL_PAGE_SIZE = 10;
+
+const fmtDate = (ts) =>
+  ts?.toDate ? ts.toDate().toLocaleDateString("ms-MY", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+
+const DETAIL_CONFIG = {
+  users: {
+    title:   "Senarai Pengguna",
+    columns: ["Nama Pengguna", "E-mel", "Peranan", "Kelab / Kategori"],
+    getRows: (summary) => summary.users,
+    renderRow: (u) => [
+      u.username || "—",
+      u.email,
+      ROLE_LABELS[u.role] ?? u.role,
+      u.club || (u.clubs ?? []).join(", ") || u.category || "—",
+    ],
+  },
+  transactions: {
+    title:   "Senarai Transaksi",
+    columns: ["Tarikh", "Kod Program", "Jenis", "Jumlah", "Oleh"],
+    getRows: (summary) => summary.transactions,
+    renderRow: (t) => [
+      t.date || "—",
+      t.programmeCode || "—",
+      t.type === "income" ? "Pendapatan" : "Perbelanjaan",
+      `RM ${Number(t.amount || 0).toFixed(2)}`,
+      t.createdByEmail || "—",
+    ],
+  },
+  pending: {
+    title:    "Borang & PDF Menunggu Kelulusan",
+    columns:  ["Tarikh", "Borang", "Kelab", "Dihantar Oleh", "Jenis"],
+    getRows:  (summary) => summary.submissions.filter(s => ["menunggu", "disemak"].includes(s.status)),
+    renderRow: submissionRow,
+  },
+  approved: {
+    title:    "Borang & PDF Diluluskan",
+    columns:  ["Tarikh", "Borang", "Kelab", "Dihantar Oleh", "Jenis"],
+    getRows:  (summary) => summary.submissions.filter(s => ["diluluskan", "selesai"].includes(s.status)),
+    renderRow: submissionRow,
+  },
+  rejected: {
+    title:    "Borang & PDF Ditolak",
+    columns:  ["Tarikh", "Borang", "Kelab", "Dihantar Oleh", "Jenis"],
+    getRows:  (summary) => summary.submissions.filter(s => s.status === "ditolak"),
+    renderRow: submissionRow,
+  },
+};
+
+function submissionRow(s) {
+  return [
+    fmtDate(s.createdAt),
+    s.formName || s.formType || "—",
+    s.createdByClub || "—",
+    s.createdByEmail || "—",
+    s.kind === "pdf" ? "PDF" : "Borang",
+  ];
+}
+
 export default function AdminDashboard() {
   const { currentUser, userProfile, logout } = useAuth();
-  const [summary, setSummary] = useState({ totalUsers: 0, totalTransactions: 0, pendingCount: 0, approvedCount: 0, rejectedCount: 0 });
+  const [summary, setSummary] = useState({
+    totalUsers: 0, totalTransactions: 0, pendingCount: 0, approvedCount: 0, rejectedCount: 0,
+    users: [], transactions: [], submissions: [],
+  });
   const [loading, setLoading] = useState(true);
+  const [detailModal, setDetailModal] = useState(null); // "users" | "transactions" | "pending" | "approved" | "rejected"
+  const [detailPage, setDetailPage] = useState(1);
 
   useEffect(() => {
     const loadSummary = async () => {
@@ -26,6 +98,16 @@ export default function AdminDashboard() {
 
   const val = loading ? "—" : null;
 
+  const cfg  = detailModal ? DETAIL_CONFIG[detailModal] : null;
+  const rows = useMemo(() => (cfg ? cfg.getRows(summary) : []), [cfg, summary]);
+  const totalPages = Math.max(1, Math.ceil(rows.length / DETAIL_PAGE_SIZE));
+  const pagedRows   = rows.slice((detailPage - 1) * DETAIL_PAGE_SIZE, detailPage * DETAIL_PAGE_SIZE);
+
+  const openDetail = (type) => {
+    setDetailModal(type);
+    setDetailPage(1);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <PageHeader
@@ -42,30 +124,33 @@ export default function AdminDashboard() {
       />
 
       <div className="mx-auto max-w-7xl p-6">
-        <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-red-800">
-          Gambaran Sistem
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-red-800">
+          Rumusan Sistem
+        </p>
+        <p className="mb-3 text-xs text-gray-400">
+          Klik pada kad di bawah untuk melihat butiran.
         </p>
         <div className="mb-8 grid gap-4 md:grid-cols-5">
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <button onClick={() => openDetail("users")} className="rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-sm transition hover:border-purple-400 hover:shadow-md">
             <p className="text-xs font-semibold uppercase tracking-wider text-purple-600">Pengguna</p>
             <h2 className="mt-2 text-2xl font-bold text-gray-900">{val ?? summary.totalUsers}</h2>
-          </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          </button>
+          <button onClick={() => openDetail("transactions")} className="rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-sm transition hover:border-blue-400 hover:shadow-md">
             <p className="text-xs font-semibold uppercase tracking-wider text-blue-600">Transaksi</p>
             <h2 className="mt-2 text-2xl font-bold text-gray-900">{val ?? summary.totalTransactions}</h2>
-          </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          </button>
+          <button onClick={() => openDetail("pending")} className="rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-sm transition hover:border-amber-400 hover:shadow-md">
             <p className="text-xs font-semibold uppercase tracking-wider text-amber-600">Menunggu</p>
             <h2 className="mt-2 text-2xl font-bold text-gray-900">{val ?? summary.pendingCount}</h2>
-          </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          </button>
+          <button onClick={() => openDetail("approved")} className="rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-sm transition hover:border-green-400 hover:shadow-md">
             <p className="text-xs font-semibold uppercase tracking-wider text-green-600">Diluluskan</p>
             <h2 className="mt-2 text-2xl font-bold text-gray-900">{val ?? summary.approvedCount}</h2>
-          </div>
-          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          </button>
+          <button onClick={() => openDetail("rejected")} className="rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-sm transition hover:border-red-400 hover:shadow-md">
             <p className="text-xs font-semibold uppercase tracking-wider text-red-600">Ditolak</p>
             <h2 className="mt-2 text-2xl font-bold text-gray-900">{val ?? summary.rejectedCount}</h2>
-          </div>
+          </button>
         </div>
 
         <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-red-800">
@@ -106,6 +191,83 @@ export default function AdminDashboard() {
           </Link>
         </div>
       </div>
+
+      {/* ── Summary detail modal ── */}
+      {detailModal && cfg && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-2xl bg-white shadow-xl">
+
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+              <h3 className="text-base font-bold text-gray-900">{cfg.title}</h3>
+              <button
+                onClick={() => setDetailModal(null)}
+                className="rounded-full p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto">
+              {rows.length === 0 ? (
+                <p className="p-6 text-sm text-gray-500">Tiada rekod dijumpai.</p>
+              ) : (
+                <table className="min-w-full">
+                  <thead className="sticky top-0 bg-red-900">
+                    <tr>
+                      {cfg.columns.map((col) => (
+                        <th key={col} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-red-100">
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {pagedRows.map((row, i) => (
+                      <tr key={row.id ?? i} className="hover:bg-gray-50">
+                        {cfg.renderRow(row).map((cell, j) => (
+                          <td key={j} className="px-4 py-3 text-sm text-gray-700">{cell}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Footer — pagination */}
+            {rows.length > 0 && (
+              <div className="flex items-center justify-between border-t border-gray-100 px-6 py-3">
+                <span className="text-xs text-gray-500">{rows.length} rekod</span>
+                {totalPages > 1 && (
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setDetailPage(p => Math.max(1, p - 1))}
+                      disabled={detailPage === 1}
+                      aria-label="Halaman sebelumnya"
+                      className="rounded-lg border border-gray-200 bg-white p-1.5 text-gray-700 transition hover:border-red-800 hover:bg-red-50 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                    </button>
+                    <span className="text-xs text-gray-500">{detailPage} / {totalPages}</span>
+                    <button
+                      onClick={() => setDetailPage(p => Math.min(totalPages, p + 1))}
+                      disabled={detailPage === totalPages}
+                      aria-label="Halaman seterusnya"
+                      className="rounded-lg border border-gray-200 bg-white p-1.5 text-gray-700 transition hover:border-red-800 hover:bg-red-50 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

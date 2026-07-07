@@ -34,6 +34,13 @@ const CONFIRM_TYPES = {
     iconBg:   "bg-amber-100",
     icon: <svg className="h-7 w-7 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>,
   },
+  unlock_cancel: {
+    title:    "Benarkan Memohon Semula?",
+    btnText:  "Ya, Benarkan",
+    btnClass: "bg-amber-500 hover:bg-amber-600",
+    iconBg:   "bg-amber-100",
+    icon: <svg className="h-7 w-7 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>,
+  },
 };
 
 const XIcon = () => (
@@ -150,6 +157,7 @@ export default function BendahariKelabAccessPage() {
     if (type === "approve")               act(approveAccess,    id, `Akses "${label}" berjaya diluluskan.`);
     else if (type === "reject")           act(rejectAccess,     id, `Permohonan "${label}" berjaya ditolak.`);
     else if (type === "revoke_rejection") act(revokeRejection,  id, `Penolakan "${label}" berjaya dibatalkan. Bendahari boleh memohon semula.`);
+    else if (type === "unlock_cancel")    act(revokeRejection,  id, `Bendahari kini boleh memohon semula untuk "${label}".`);
   };
 
   // Sort cycle: null → asc → desc → null
@@ -348,10 +356,25 @@ export default function BendahariKelabAccessPage() {
       <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(r.rejectedAt)}</td>
       <td className="px-4 py-3"><span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-bold text-red-800">{r.programmeCode}</span></td>
       <td className="px-4 py-3 text-sm text-gray-700">{r.programmeName}</td>
-      <td className="px-4 py-3 text-xs text-gray-500">{r.treasurerUsername || r.treasurerEmail}</td>
+      <td className="px-4 py-3 text-xs text-gray-500">
+        {r.treasurerUsername || r.treasurerEmail}
+        {r.cancelledBySelf && (
+          <span className="ml-2 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500">
+            Dibatalkan Sendiri
+          </span>
+        )}
+      </td>
       <td className="px-4 py-3">
-        <button onClick={() => setConfirm({ type: "revoke_rejection", id: r.id, label: `${r.programmeCode} — ${r.treasurerUsername || r.treasurerEmail}` })} disabled={actioning === r.id} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-100 disabled:opacity-50">
-          {actioning === r.id ? "..." : "Batal Tolakan"}
+        <button
+          onClick={() => setConfirm({
+            type:  r.cancelledBySelf ? "unlock_cancel" : "revoke_rejection",
+            id:    r.id,
+            label: `${r.programmeCode} — ${r.treasurerUsername || r.treasurerEmail}`,
+          })}
+          disabled={actioning === r.id}
+          className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-100 disabled:opacity-50"
+        >
+          {actioning === r.id ? "..." : (r.cancelledBySelf ? "Benarkan Semula" : "Batal Tolakan")}
         </button>
       </td>
     </tr>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import PageHeader from "../components/PageHeader";
@@ -13,11 +13,11 @@ import {
 } from "../services/userService";
 
 const ROLE_META = {
-  treasurer:       { label: "Bendahari",       color: "bg-blue-100 text-blue-700" },
-  advisor:         { label: "Penasihat",        color: "bg-amber-100 text-amber-700" },
-  admin:           { label: "Admin",            color: "bg-purple-100 text-purple-700" },
-  bendahari_kelab: { label: "Bendahari Kelab",  color: "bg-teal-100 text-teal-700" },
-  pegawai:         { label: "Pegawai",          color: "bg-indigo-100 text-indigo-700" },
+  treasurer:       { label: "Bendahari",         color: "bg-blue-100 text-blue-700" },
+  advisor:         { label: "Penasihat Kelab",   color: "bg-amber-100 text-amber-700" },
+  admin:           { label: "Admin",             color: "bg-purple-100 text-purple-700" },
+  bendahari_kelab: { label: "Bendahari Kelab",   color: "bg-teal-100 text-teal-700" },
+  pegawai:         { label: "Pegawai Kewangan",  color: "bg-indigo-100 text-indigo-700" },
 };
 
 const roleBadge = (role) => {
@@ -27,15 +27,31 @@ const roleBadge = (role) => {
 };
 const roleLabel = (role) => ROLE_META[role]?.label ?? role;
 
+const USERS_PAGE_SIZE = 20;
+
+// Flattened club/category text for a user — used for both display and search matching.
+const userClubText = (item) => {
+  if (item.role === "bendahari_kelab") return item.club || "";
+  if (item.role === "advisor")         return (item.clubs ?? []).join(", ");
+  if (item.role === "pegawai")         return item.category || "";
+  return "";
+};
+
 export default function UserManagementPage() {
   const navigate = useNavigate();
 
   const [users, setUsers]         = useState([]);
   const [loading, setLoading]     = useState(true);
   const [errorMsg, setErrorMsg]   = useState("");
-  const [message, setMessage]     = useState("");
+
+  const [search, setSearch]         = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [usersPage, setUsersPage]   = useState(1);
 
   const [form, setForm] = useState({ email: "", password: "", role: "treasurer", club: "", clubs: [""], category: "" });
+  const [showCreateConfirm, setShowCreateConfirm] = useState(false);
+  const [creating, setCreating]                   = useState(false);
+  const [createSuccess, setCreateSuccess]         = useState(false);
 
   const [editingUser, setEditingUser]   = useState(null);
   const [editRole, setEditRole]         = useState("");
@@ -43,6 +59,12 @@ export default function UserManagementPage() {
   const [editClubs, setEditClubs]       = useState([""]);
   const [editCategory, setEditCategory] = useState("");
   const [editSaving, setEditSaving]     = useState(false);
+  const [showSaveRoleConfirm, setShowSaveRoleConfirm] = useState(false);
+  const [saveRoleSuccess, setSaveRoleSuccess]         = useState(false);
+
+  const [removeTarget, setRemoveTarget]   = useState(null); // user being removed
+  const [removing, setRemoving]           = useState(false);
+  const [removeSuccess, setRemoveSuccess] = useState(false);
 
   const PEGAWAI_CATEGORIES = Object.keys(CLUB_CATEGORIES);
 
@@ -57,13 +79,18 @@ export default function UserManagementPage() {
   const handleChange = (e) => setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
 
   // ── Create user ──────────────────────────────────────────────────────────────
-  const handleCreateUser = async (e) => {
+  const handleCreateUser = (e) => {
     e.preventDefault();
-    setErrorMsg(""); setMessage("");
+    setErrorMsg("");
     if (!form.email || !form.password || !form.role) { setErrorMsg("Sila lengkapkan semua medan."); return; }
     if (form.role === "bendahari_kelab" && !form.club.trim()) { setErrorMsg("Sila masukkan nama kelab untuk Bendahari Kelab."); return; }
-    if (form.role === "advisor" && form.clubs.every(c => !c.trim())) { setErrorMsg("Sila masukkan sekurang-kurangnya satu kelab untuk Penasihat."); return; }
-    if (form.role === "pegawai" && !form.category) { setErrorMsg("Sila pilih kategori kelab untuk Pegawai."); return; }
+    if (form.role === "advisor" && form.clubs.every(c => !c.trim())) { setErrorMsg("Sila masukkan sekurang-kurangnya satu kelab untuk Penasihat Kelab."); return; }
+    if (form.role === "pegawai" && !form.category) { setErrorMsg("Sila pilih kategori kelab untuk Pegawai Kewangan."); return; }
+    setShowCreateConfirm(true);
+  };
+
+  const handleConfirmCreate = async () => {
+    setCreating(true); setErrorMsg("");
     try {
       const cred = await createUserWithEmailAndPassword(secondaryAuth, form.email, form.password);
       await createUserProfile(cred.user.uid, {
@@ -73,10 +100,12 @@ export default function UserManagementPage() {
         clubs:    form.clubs.map(c => c.trim()).filter(Boolean),
         category: form.category,
       });
-      setMessage("Pengguna berjaya dicipta.");
       setForm({ email: "", password: "", role: "treasurer", club: "", clubs: [""], category: "" });
+      setShowCreateConfirm(false);
+      setCreateSuccess(true);
       await loadUsers();
-    } catch { setErrorMsg("Gagal mencipta pengguna."); }
+    } catch { setErrorMsg("Gagal mencipta pengguna."); setShowCreateConfirm(false); }
+    finally { setCreating(false); }
   };
 
   // ── Edit role modal ──────────────────────────────────────────────────────────
@@ -88,32 +117,62 @@ export default function UserManagementPage() {
     setEditCategory(user.category || "");
   };
 
-  const handleSaveRole = async () => {
+  const handleSaveRoleClick = () => {
     if (!editingUser) return;
     if (editRole === "bendahari_kelab" && !editClub.trim()) { alert("Sila masukkan nama kelab."); return; }
     if (editRole === "advisor" && editClubs.every(c => !c.trim())) { alert("Sila masukkan sekurang-kurangnya satu kelab."); return; }
-    if (editRole === "pegawai" && !editCategory) { alert("Sila pilih kategori kelab untuk Pegawai."); return; }
+    if (editRole === "pegawai" && !editCategory) { alert("Sila pilih kategori kelab untuk Pegawai Kewangan."); return; }
+    setShowSaveRoleConfirm(true);
+  };
+
+  const handleConfirmSaveRole = async () => {
+    if (!editingUser) return;
     try {
-      setEditSaving(true); setErrorMsg(""); setMessage("");
+      setEditSaving(true); setErrorMsg("");
       await updateUserRole(editingUser.id, editRole, {
         club:     editClub.trim(),
         clubs:    editClubs.map(c => c.trim()).filter(Boolean),
         category: editCategory,
       });
-      setMessage("Peranan pengguna dikemaskini.");
-      setEditingUser(null); await loadUsers();
-    } catch { setErrorMsg("Gagal mengemaskini peranan."); }
+      setShowSaveRoleConfirm(false);
+      setEditingUser(null);
+      setSaveRoleSuccess(true);
+      await loadUsers();
+    } catch { setErrorMsg("Gagal mengemaskini peranan."); setShowSaveRoleConfirm(false); }
     finally { setEditSaving(false); }
   };
 
-  const handleRemoveAccess = async (uid) => {
-    if (!window.confirm("Buang akses pengguna ini dari aplikasi?")) return;
+  const handleConfirmRemove = async () => {
+    if (!removeTarget) return;
     try {
-      setErrorMsg(""); setMessage("");
-      await removeUserAccess(uid);
-      setMessage("Data profil pengguna dibuang. Nota: Akaun Firebase Auth masih wujud — padam secara manual di Firebase Console jika perlu."); await loadUsers();
-    } catch { setErrorMsg("Gagal membuang akses pengguna."); }
+      setRemoving(true); setErrorMsg("");
+      await removeUserAccess(removeTarget.id);
+      setRemoveTarget(null);
+      setRemoveSuccess(true);
+      await loadUsers();
+    } catch { setErrorMsg("Gagal membuang akses pengguna."); setRemoveTarget(null); }
+    finally { setRemoving(false); }
   };
+
+  const filteredUsers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return users.filter(item => {
+      if (roleFilter && item.role !== roleFilter) return false;
+      if (!q) return true;
+      return item.email.toLowerCase().includes(q) || userClubText(item).toLowerCase().includes(q);
+    });
+  }, [users, search, roleFilter]);
+
+  const usersTotalPages = Math.max(1, Math.ceil(filteredUsers.length / USERS_PAGE_SIZE));
+  const pagedUsers = filteredUsers.slice((usersPage - 1) * USERS_PAGE_SIZE, usersPage * USERS_PAGE_SIZE);
+
+  useEffect(() => {
+    setUsersPage(1);
+  }, [search, roleFilter]);
+
+  useEffect(() => {
+    if (usersPage > usersTotalPages) setUsersPage(usersTotalPages);
+  }, [usersPage, usersTotalPages]);
 
   const inputClass = "w-full rounded-xl border border-gray-200 px-4 py-3 text-sm outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100";
 
@@ -168,8 +227,8 @@ export default function UserManagementPage() {
               <select name="role" value={form.role} onChange={handleChange} className={inputClass}>
                 <option value="treasurer">Bendahari</option>
                 <option value="bendahari_kelab">Bendahari Kelab</option>
-                <option value="pegawai">Pegawai</option>
-                <option value="advisor">Penasihat</option>
+                <option value="pegawai">Pegawai Kewangan</option>
+                <option value="advisor">Penasihat Kelab</option>
                 <option value="admin">Admin</option>
               </select>
             </div>
@@ -183,7 +242,7 @@ export default function UserManagementPage() {
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-gray-600">Kelab Yang Dipertanggungjawabkan</label>
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700 mb-2">
-                  Penasihat dipertanggungjawabkan ke atas <strong>satu kelab</strong> secara lalai. Kelab tambahan memerlukan kelulusan admin.
+                  Penasihat Kelab dipertanggungjawabkan ke atas <strong>satu kelab</strong> secara lalai. Kelab tambahan memerlukan kelulusan admin.
                 </div>
                 <ClubListEditor clubs={form.clubs} onChange={clubs => setForm(p=>({...p,clubs}))} inputCls={inputClass} />
               </div>
@@ -202,24 +261,48 @@ export default function UserManagementPage() {
             </button>
           </form>
           {errorMsg && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{errorMsg}</div>}
-          {message  && <div className="mt-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{message}</div>}
         </div>
 
         {/* Jadual pengguna */}
         <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-red-100 px-6 py-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-red-700">Pengguna Berdaftar</h2>
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-red-700">Pengguna Berdaftar</h2>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="relative flex-1">
+                <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                </svg>
+                <input
+                  type="text"
+                  placeholder="Cari e-mel atau kelab..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-red-400 focus:ring-1 focus:ring-red-100"
+                />
+              </div>
+              <select
+                value={roleFilter}
+                onChange={e => setRoleFilter(e.target.value)}
+                className="rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-red-400 focus:ring-1 focus:ring-red-100 sm:w-56"
+              >
+                <option value="">Semua Peranan</option>
+                {Object.entries(ROLE_META).map(([value, meta]) => (
+                  <option key={value} value={value}>{meta.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
           {loading ? (
             <p className="p-6 text-sm text-gray-500">Memuatkan pengguna...</p>
           ) : users.length === 0 ? (
             <p className="p-6 text-sm text-gray-500">Tiada pengguna dijumpai.</p>
+          ) : filteredUsers.length === 0 ? (
+            <p className="p-6 text-sm text-gray-500">Tiada pengguna sepadan dengan carian / penapis.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full">
                 <thead>
                   <tr className="bg-red-900 text-left">
-                    <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">UID</th>
                     <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">E-mel</th>
                     <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Peranan</th>
                     <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Kelab</th>
@@ -227,9 +310,8 @@ export default function UserManagementPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-red-50">
-                  {users.map((item) => (
+                  {pagedUsers.map((item) => (
                     <tr key={item.id} className="hover:bg-red-50 transition-colors">
-                      <td className="px-4 py-3 text-xs text-gray-400">{item.id}</td>
                       <td className="px-4 py-3 text-sm text-gray-700">{item.email}</td>
                       <td className="px-4 py-3"><span className={roleBadge(item.role)}>{roleLabel(item.role)}</span></td>
                       <td className="px-4 py-3 text-xs text-gray-500">
@@ -251,7 +333,7 @@ export default function UserManagementPage() {
                           <button onClick={() => openEdit(item)} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-700">
                             Tukar Peranan
                           </button>
-                          <button onClick={() => handleRemoveAccess(item.id)} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700">
+                          <button onClick={() => setRemoveTarget(item)} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700">
                             Buang
                           </button>
                         </div>
@@ -260,6 +342,30 @@ export default function UserManagementPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {!loading && filteredUsers.length > 0 && usersTotalPages > 1 && (
+            <div className="flex items-center justify-between border-t border-gray-100 px-6 py-3">
+              <span className="text-xs text-gray-500">{filteredUsers.length} pengguna</span>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setUsersPage(p => Math.max(1, p - 1))}
+                  disabled={usersPage === 1}
+                  aria-label="Halaman sebelumnya"
+                  className="rounded-lg border border-gray-200 bg-white p-1.5 text-gray-700 transition hover:border-red-800 hover:bg-red-50 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                </button>
+                <span className="text-xs text-gray-500">{usersPage} / {usersTotalPages}</span>
+                <button
+                  onClick={() => setUsersPage(p => Math.min(usersTotalPages, p + 1))}
+                  disabled={usersPage === usersTotalPages}
+                  aria-label="Halaman seterusnya"
+                  className="rounded-lg border border-gray-200 bg-white p-1.5 text-gray-700 transition hover:border-red-800 hover:bg-red-50 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -277,8 +383,8 @@ export default function UserManagementPage() {
                 <select value={editRole} onChange={e => setEditRole(e.target.value)} className={inputClass}>
                   <option value="treasurer">Bendahari</option>
                   <option value="bendahari_kelab">Bendahari Kelab</option>
-                  <option value="pegawai">Pegawai</option>
-                  <option value="advisor">Penasihat</option>
+                  <option value="pegawai">Pegawai Kewangan</option>
+                  <option value="advisor">Penasihat Kelab</option>
                   <option value="admin">Admin</option>
                 </select>
               </div>
@@ -311,13 +417,148 @@ export default function UserManagementPage() {
               )}
             </div>
             <div className="mt-6 flex gap-3">
-              <button onClick={handleSaveRole} disabled={editSaving} className="flex-1 rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800 disabled:opacity-60">
+              <button onClick={handleSaveRoleClick} disabled={editSaving} className="flex-1 rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800 disabled:opacity-60">
                 {editSaving ? "Menyimpan..." : "Simpan"}
               </button>
               <button onClick={() => setEditingUser(null)} className="rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-100">
                 Batal
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm save role */}
+      {showSaveRoleConfirm && editingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-100">
+              <svg className="h-7 w-7 text-red-800" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+            </div>
+            <h3 className="mb-2 text-base font-bold text-gray-900">Kemaskini Peranan Pengguna?</h3>
+            <p className="mb-6 text-sm text-gray-600">
+              <span className="font-semibold text-gray-800">{editingUser.email}</span> akan ditukar peranan kepada{" "}
+              <span className="font-semibold text-gray-800">{ROLE_META[editRole]?.label ?? editRole}</span>.
+            </p>
+            {errorMsg && <p className="mb-4 text-xs text-red-600">{errorMsg}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => setShowSaveRoleConfirm(false)} disabled={editSaving} className="flex-1 rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50">
+                Batal
+              </button>
+              <button onClick={handleConfirmSaveRole} disabled={editSaving} className="flex-1 rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800 disabled:opacity-60">
+                {editSaving ? "Menyimpan..." : "Ya, Kemaskini"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save role success */}
+      {saveRoleSuccess && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
+              <svg className="h-7 w-7 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h3 className="mb-2 text-base font-bold text-gray-900">Berjaya</h3>
+            <p className="mb-6 text-sm text-gray-500">Peranan pengguna berjaya dikemaskini.</p>
+            <button onClick={() => setSaveRoleSuccess(false)} className="w-full rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800">
+              Okay
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm remove user */}
+      {removeTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-100">
+              <svg className="h-7 w-7 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </div>
+            <h3 className="mb-2 text-base font-bold text-gray-900">Buang Akses Pengguna?</h3>
+            <p className="mb-6 text-sm text-gray-600">
+              Akses <span className="font-semibold text-gray-800">{removeTarget.email}</span> akan dibuang dari aplikasi.
+            </p>
+            {errorMsg && <p className="mb-4 text-xs text-red-600">{errorMsg}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => setRemoveTarget(null)} disabled={removing} className="flex-1 rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50">
+                Batal
+              </button>
+              <button onClick={handleConfirmRemove} disabled={removing} className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60">
+                {removing ? "Membuang..." : "Ya, Buang"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove user success */}
+      {removeSuccess && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
+              <svg className="h-7 w-7 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h3 className="mb-2 text-base font-bold text-gray-900">Berjaya</h3>
+            <p className="mb-2 text-sm text-gray-500">Data profil pengguna berjaya dibuang.</p>
+            <p className="mb-6 text-xs text-gray-400">Nota: Akaun Firebase Auth masih wujud — padam secara manual di Firebase Console jika perlu.</p>
+            <button onClick={() => setRemoveSuccess(false)} className="w-full rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800">
+              Okay
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm create user */}
+      {showCreateConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-100">
+              <svg className="h-7 w-7 text-red-800" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+            </div>
+            <h3 className="mb-2 text-base font-bold text-gray-900">Cipta Pengguna Baru?</h3>
+            <p className="mb-6 text-sm text-gray-600">
+              <span className="font-semibold text-gray-800">{form.email}</span> akan dicipta sebagai{" "}
+              <span className="font-semibold text-gray-800">{ROLE_META[form.role]?.label ?? form.role}</span>.
+            </p>
+            {errorMsg && <p className="mb-4 text-xs text-red-600">{errorMsg}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => setShowCreateConfirm(false)} disabled={creating} className="flex-1 rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50">
+                Batal
+              </button>
+              <button onClick={handleConfirmCreate} disabled={creating} className="flex-1 rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800 disabled:opacity-60">
+                {creating ? "Mencipta..." : "Ya, Cipta"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create user success */}
+      {createSuccess && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
+              <svg className="h-7 w-7 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h3 className="mb-2 text-base font-bold text-gray-900">Berjaya</h3>
+            <p className="mb-6 text-sm text-gray-500">Pengguna berjaya dicipta.</p>
+            <button onClick={() => setCreateSuccess(false)} className="w-full rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800">
+              Okay
+            </button>
           </div>
         </div>
       )}

@@ -36,6 +36,14 @@ export async function getTransactionsByUser(uid, programmeCode) {
     .sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
 }
 
+// Admin — every transaction in the system, unrestricted
+export async function getAllTransactions() {
+  const snapshot = await getDocs(transactionsRef);
+  return snapshot.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+}
+
 export async function getPendingTransactions() {
   const q = query(transactionsRef, where("status", "==", "pending"));
   const snapshot = await getDocs(q);

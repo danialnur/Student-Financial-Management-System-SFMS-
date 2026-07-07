@@ -1,9 +1,14 @@
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase/config";
+import { getAllBorang } from "./formService";
+import { getAllPdfSubmissions } from "./pdfSubmissionService";
 
 const transactionsRef = collection(db, "transactions");
 const usersRef = collection(db, "users");
 const programmesRef = collection(db, "programmes");
+
+const PENDING_STATUSES  = ["menunggu", "disemak"];
+const APPROVED_STATUSES = ["diluluskan", "selesai"];
 
 export async function getTreasurerDashboardSummary(uid, programmeCode) {
   const constraints = [where("createdBy", "==", uid)];
@@ -20,10 +25,29 @@ export async function getTreasurerDashboardSummary(uid, programmeCode) {
 }
 
 export async function getAdminDashboardSummary() {
-  const [usersSnap, txSnap] = await Promise.all([getDocs(usersRef), getDocs(transactionsRef)]);
+  const [usersSnap, txSnap, forms, pdfs] = await Promise.all([
+    getDocs(usersRef),
+    getDocs(transactionsRef),
+    getAllBorang(),
+    getAllPdfSubmissions(),
+  ]);
+
+  const users        = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const transactions  = txSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const submissions   = [
+    ...forms.map(f => ({ ...f, kind: "borang" })),
+    ...pdfs.map(p  => ({ ...p, kind: "pdf" })),
+  ].sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+
   return {
-    totalUsers:        usersSnap.size,
-    totalTransactions: txSnap.size,
+    totalUsers:        users.length,
+    totalTransactions:  transactions.length,
+    pendingCount:  submissions.filter(s => PENDING_STATUSES.includes(s.status)).length,
+    approvedCount: submissions.filter(s => APPROVED_STATUSES.includes(s.status)).length,
+    rejectedCount: submissions.filter(s => s.status === "ditolak").length,
+    users,
+    transactions,
+    submissions,
   };
 }
 

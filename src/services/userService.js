@@ -4,7 +4,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -16,9 +15,10 @@ import { db } from "../firebase/config";
 const usersRef = collection(db, "users");
 
 export async function getAllUsers() {
-  const q = query(usersRef, orderBy("email", "asc"));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+  const snapshot = await getDocs(usersRef);
+  return snapshot.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
 }
 
 // Public, PII-free lookup used only to resolve a username to an email before

@@ -114,6 +114,14 @@ export const getPendingBorangByCategory = async (category) => {
     .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
 };
 
+// Admin — every form submission in the system, all statuses, unrestricted
+export const getAllBorang = async () => {
+  const snap = await getDocs(collection(db, "formSubmissions"));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+};
+
 // Bendahari Kelab — all forms from their club, all statuses
 export const getAllBorangByClub = async (club) => {
   if (!club) return [];

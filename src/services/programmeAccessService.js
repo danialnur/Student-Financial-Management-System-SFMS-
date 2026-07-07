@@ -32,8 +32,9 @@ export async function requestProgrammeAccess({ programmeId, programmeCode, progr
   } else {
     const data = snap.data();
     if (data.status === "rejected") {
-      // MAX_ATTEMPTS = 1 means rejection is always permanent for self-service
-      throw new Error("MAX_ATTEMPTS_EXCEEDED");
+      // MAX_ATTEMPTS = 1 means rejection (or self-cancellation) is always
+      // permanent for self-service — only the club treasurer can unlock it.
+      throw new Error(data.cancelledBySelf ? "CANCELLED_BY_SELF" : "MAX_ATTEMPTS_EXCEEDED");
     } else if (data.status === "revoked") {
       if ((await countPending(treasurerUid)) >= MAX_PENDING_REQUESTS) throw new Error("MAX_PENDING_EXCEEDED");
       await updateDoc(docRef, {
@@ -90,4 +91,15 @@ export async function rejectAccess(id) {
 
 export async function revokeAccess(id) {
   await updateDoc(doc(db, "programmeAccess", id), { status: "revoked", revokedAt: serverTimestamp() });
+}
+
+// Treasurer withdraws their own pending request. Treated the same as a
+// bendahari-kelab rejection (blocks re-request until unlocked) but flagged
+// so the club treasurer's view can tell the two apart.
+export async function cancelAccessRequest(id) {
+  await updateDoc(doc(db, "programmeAccess", id), {
+    status:          "rejected",
+    rejectedAt:      serverTimestamp(),
+    cancelledBySelf: true,
+  });
 }

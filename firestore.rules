@@ -101,6 +101,7 @@ service cloud.firestore {
     // ── programmeAccess ────────────────────────────────────────────────────
     match /programmeAccess/{docId} {
       allow read:   if isSignedIn() && (
+                      resource == null ||
                       resource.data.treasurerUid == request.auth.uid ||
                       isAdmin() || inClub(resource.data.club)
                     );

@@ -703,7 +703,7 @@ const statusBadge=(s)=>{
   return `${b} bg-amber-100 text-amber-700`;
 };
 const typeLabel=(t)=>t==="income"?"Pendapatan":"Perbelanjaan";
-const SUBMIT_TO_LABELS = { bendahari_kelab: "Bendahari Kelab", advisor: "Penasihat Kelab", pegawai: "Pegawai" };
+const SUBMIT_TO_LABELS = { bendahari_kelab: "Bendahari Kelab", advisor: "Penasihat Kelab", pegawai: "Pegawai Kewangan" };
 const emptyRowFor=(config)=>{ const r={}; config.rowColumns.forEach(c=>{r[c.key]=""}); return r; };
 const initialRowsFor=(config)=> config.rowColumns ? Array.from({length: config.fixedRowCount || 1}, () => emptyRowFor(config)) : [];
 
@@ -1463,8 +1463,8 @@ export default function ReportPage({ tab: forcedTab }) {
                   {[
                     { n:"1", label:"Isi Borang Baru", sub:'Tekan "Isi Borang Baru"',          bg:"bg-red-900" },
                     { n:"2", label:"Sudah Dihantar",  sub:"Hantar untuk semakan",              bg:"bg-amber-500" },
-                    { n:"3", label:"Sedang Disemak",  sub:"Penasihat/Pegawai membuka borang",  bg:"bg-blue-500" },
-                    { n:"4", label:"Diluluskan/Tolak",sub:"Keputusan Penasihat/Pegawai",       bg:"bg-green-600" },
+                    { n:"3", label:"Sedang Disemak",  sub:"Penasihat Kelab/Pegawai Kewangan membuka borang",  bg:"bg-blue-500" },
+                    { n:"4", label:"Diluluskan/Tolak",sub:"Keputusan Penasihat Kelab/Pegawai Kewangan",       bg:"bg-green-600" },
                     { n:"5", label:"Selesai",          sub:"Proses lengkap",                   bg:"bg-purple-600" },
                   ].map((step, i, arr) => (
                     <div key={i} className="flex flex-1 items-start">

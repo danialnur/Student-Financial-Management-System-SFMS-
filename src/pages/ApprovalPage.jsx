@@ -13,7 +13,7 @@ import PageHeader from "../components/PageHeader";
 import { FORMS_CONFIG } from "../config/formsConfig";
 import { SignaturePanel } from "../components/SignatureCapture";
 
-const SUBMIT_TO_LABELS = { bendahari_kelab: "Bendahari Kelab", advisor: "Penasihat", pegawai: "Pegawai" };
+const SUBMIT_TO_LABELS = { bendahari_kelab: "Bendahari Kelab", advisor: "Penasihat Kelab", pegawai: "Pegawai Kewangan" };
 
 const todayISO = () => {
   const d = new Date();
@@ -539,7 +539,7 @@ export default function ApprovalPage() {
             })}
             {viewingBorang.formType === "penyerahan-cek-wang-tunai" && (
               <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-amber-700">Disahkan Oleh (Diisi oleh Penasihat)</p>
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-amber-700">Disahkan Oleh (Diisi oleh Penasihat Kelab)</p>
                 <div className="space-y-3">
                   {[
                     { key: "disahkan_nama",    label: "Nama",    type: "text", placeholder: "Nama pegawai pengesah" },

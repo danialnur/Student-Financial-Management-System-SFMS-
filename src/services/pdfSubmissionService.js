@@ -33,6 +33,14 @@ export async function submitPdfBorang(uid, email, club, formType, formName, pdfB
   return pdfUrl;
 }
 
+// Admin — every PDF submission in the system, all statuses, unrestricted
+export async function getAllPdfSubmissions() {
+  const snap = await getDocs(collection(db, "pdfSubmissions"));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+}
+
 // Admin — sees everything, unrestricted
 export async function getPdfSubmissions() {
   const snap = await getDocs(query(collection(db, "pdfSubmissions"), where("status", "==", "menunggu")));

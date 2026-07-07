@@ -37,7 +37,7 @@ export default function PegawaiDashboard() {
 
         <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
           <span className="font-semibold">Log masuk sebagai: </span>{currentUser?.email}
-          <span className="mx-2 text-indigo-300">·</span>Pegawai
+          <span className="mx-2 text-indigo-300">·</span>Pegawai Kewangan
           {category && (
             <>
               <span className="mx-2 text-indigo-300">·</span>

@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getTreasurerDashboardSummary } from "../services/dashboardService";
 import { getProgrammesByClub } from "../services/programmeService";
-import { MAX_PENDING_REQUESTS, getAccessByTreasurer } from "../services/programmeAccessService";
+import { MAX_PENDING_REQUESTS, getAccessByTreasurer, cancelAccessRequest } from "../services/programmeAccessService";
 import { getTransactionsByUser } from "../services/transactionService";
 import { useIdleTimer } from "../hooks/useIdleTimer";
 import PageHeader from "../components/PageHeader";
@@ -11,6 +11,8 @@ import { CLUB_CATEGORIES } from "../config/clubsConfig";
 
 const CATEGORIES   = Object.keys(CLUB_CATEGORIES);
 const EMPTY_SUMMARY = { totalIncome: 0, totalExpense: 0, balance: 0 };
+const PROG_PAGE_SIZE = 10;
+const TXN_PAGE_SIZE  = 10;
 
 // Reverse map: club name → category
 const CLUB_TO_CATEGORY = {};
@@ -41,11 +43,17 @@ export default function TreasurerDashboard() {
 
   const [shortcutSearch, setShortcutSearch] = useState("");
   const [progSearch, setProgSearch]         = useState("");
+  const [progPage, setProgPage]             = useState(1);
 
   const [txnModal, setTxnModal]     = useState(null); // "income" | "expense" | "all"
   const [txnList, setTxnList]       = useState([]);
   const [txnLoading, setTxnLoading] = useState(false);
   const [txnSort, setTxnSort]       = useState({ col: null, dir: null });
+  const [txnPage, setTxnPage]       = useState(1);
+
+  const [cancelTarget, setCancelTarget] = useState(null); // pending request being cancelled
+  const [cancelling, setCancelling]     = useState(false);
+  const [cancelError, setCancelError]   = useState("");
 
   // Load all access records on mount (for shortcuts + pending banner)
   useEffect(() => {
@@ -53,17 +61,43 @@ export default function TreasurerDashboard() {
     getAccessByTreasurer(uid).then(setAllAccessRecords).catch(() => {});
   }, [uid]);
 
+  const handleCancelRequest = async () => {
+    if (!cancelTarget) return;
+    setCancelling(true);
+    setCancelError("");
+    try {
+      await cancelAccessRequest(cancelTarget.id);
+      const fresh = await getAccessByTreasurer(uid);
+      setAllAccessRecords(fresh);
+      if (selectedClub) {
+        const map = {};
+        fresh.forEach(r => {
+          const existing = map[r.programmeId];
+          if (!existing || (r.requestedAt?.seconds ?? 0) > (existing.requestedAt?.seconds ?? 0)) {
+            map[r.programmeId] = r;
+          }
+        });
+        setAccessMap(map);
+      }
+      setCancelTarget(null);
+    } catch {
+      setCancelError("Gagal membatalkan permohonan. Sila cuba lagi.");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   const allPendingRequests = allAccessRecords.filter(r => r.status === "pending");
   const approvedShortcuts  = allAccessRecords.filter(r => r.status === "approved");
 
   const filteredShortcuts = useMemo(() => {
     const q = shortcutSearch.trim().toLowerCase();
-    if (!q) return approvedShortcuts;
-    return approvedShortcuts.filter(r =>
+    const matched = !q ? approvedShortcuts : approvedShortcuts.filter(r =>
       r.programmeCode.toLowerCase().includes(q) ||
       r.programmeName.toLowerCase().includes(q) ||
       r.club.toLowerCase().includes(q)
     );
+    return [...matched].sort((a, b) => a.programmeCode.localeCompare(b.programmeCode));
   }, [approvedShortcuts, shortcutSearch]);
 
   const filteredProgrammes = useMemo(() => {
@@ -71,12 +105,32 @@ export default function TreasurerDashboard() {
     // there's nothing the treasurer can do with them (MAX_ATTEMPTS = 1, no retry).
     const visible = programmes.filter(p => accessMap[p.id]?.status !== "rejected");
     const q = progSearch.trim().toLowerCase();
-    if (!q) return visible;
-    return visible.filter(p =>
+    const matched = !q ? visible : visible.filter(p =>
       p.code.toLowerCase().includes(q) ||
       p.name.toLowerCase().includes(q)
     );
+    // Approved (selectable) programmes float to the top of the list.
+    return [...matched].sort((a, b) => {
+      const aApproved = accessMap[a.id]?.status === "approved";
+      const bApproved = accessMap[b.id]?.status === "approved";
+      if (aApproved === bApproved) return 0;
+      return aApproved ? -1 : 1;
+    });
   }, [programmes, progSearch, accessMap]);
+
+  const progTotalPages = Math.max(1, Math.ceil(filteredProgrammes.length / PROG_PAGE_SIZE));
+  const pagedProgrammes = filteredProgrammes.slice(
+    (progPage - 1) * PROG_PAGE_SIZE,
+    progPage * PROG_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setProgPage(1);
+  }, [progSearch, selectedClub]);
+
+  useEffect(() => {
+    if (progPage > progTotalPages) setProgPage(progTotalPages);
+  }, [progPage, progTotalPages]);
 
   const handleExpire = useCallback(() => {
     if (uid) {
@@ -253,6 +307,7 @@ export default function TreasurerDashboard() {
       if (prev.dir === "asc") return { col, dir: "desc" };
       return { col: null, dir: null };
     });
+    setTxnPage(1);
   };
 
   const sortedTxnList = useMemo(() => {
@@ -278,14 +333,30 @@ export default function TreasurerDashboard() {
         const va = Number(a.amount || 0), vb = Number(b.amount || 0);
         return dir === "asc" ? va - vb : vb - va;
       }
+      if (col === "jenis") {
+        const va = a.type || "", vb = b.type || "";
+        return dir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+      }
       return 0;
     });
   }, [txnList, txnSort]);
+
+  // Pagination only applies to the single-type (income/expense) views —
+  // "all" keeps showing everything since it also carries the running totals.
+  const txnTotalPages = Math.max(1, Math.ceil(sortedTxnList.length / TXN_PAGE_SIZE));
+  const pagedTxnList = txnModal === "all"
+    ? sortedTxnList
+    : sortedTxnList.slice((txnPage - 1) * TXN_PAGE_SIZE, txnPage * TXN_PAGE_SIZE);
+
+  useEffect(() => {
+    if (txnPage > txnTotalPages) setTxnPage(txnTotalPages);
+  }, [txnPage, txnTotalPages]);
 
   const openTxnModal = async (type) => {
     setTxnModal(type);
     setTxnList([]);
     setTxnSort({ col: null, dir: null });
+    setTxnPage(1);
     setTxnLoading(true);
     try {
       const all = await getTransactionsByUser(uid, selectedProgramme.code);
@@ -298,7 +369,9 @@ export default function TreasurerDashboard() {
   };
 
   const filteredClubs = selectedCategory
-    ? CLUB_CATEGORIES[selectedCategory].filter(c => c.toLowerCase().includes(clubSearch.toLowerCase()))
+    ? [...CLUB_CATEGORIES[selectedCategory]]
+        .filter(c => c.toLowerCase().includes(clubSearch.toLowerCase()))
+        .sort((a, b) => a.localeCompare(b))
     : [];
 
   const pendingCount = Object.values(accessMap).filter(r => r.status === "pending").length;
@@ -405,9 +478,12 @@ export default function TreasurerDashboard() {
                       </span>
                     </>
                   )}
-                  <span className="ml-auto inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
-                    Menunggu
-                  </span>
+                  <button
+                    onClick={() => setCancelTarget(r)}
+                    className="ml-auto rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-red-800 hover:bg-red-50 hover:text-red-800"
+                  >
+                    Batalkan
+                  </button>
                 </div>
               ))}
             </div>
@@ -460,7 +536,11 @@ export default function TreasurerDashboard() {
                   }
                 }}
                 onFocus={() => setShowClubOptions(true)}
-                className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                className={`w-full rounded-xl border px-4 py-3 text-sm outline-none transition focus:ring-2 focus:ring-red-100 ${
+                  selectedClub
+                    ? "border-red-800 bg-red-50 font-semibold text-red-800 focus:border-red-800"
+                    : "border-gray-200 focus:border-red-500"
+                }`}
               />
               {showClubOptions && filteredClubs.length > 0 && (
                 <ul className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
@@ -483,11 +563,6 @@ export default function TreasurerDashboard() {
                 </div>
               )}
             </div>
-            {selectedClub && (
-              <p className="mt-2 text-xs text-gray-500">
-                Dipilih: <span className="font-semibold text-red-800">{selectedClub}</span>
-              </p>
-            )}
           </div>
         )}
 
@@ -539,7 +614,7 @@ export default function TreasurerDashboard() {
                 {filteredProgrammes.length === 0 && progSearch ? (
                   <p className="py-2 text-sm text-gray-400">Tiada program yang sepadan dengan carian.</p>
                 ) : null}
-                {filteredProgrammes.map((p) => {
+                {pagedProgrammes.map((p) => {
                   const access      = accessMap[p.id];
                   const status      = access?.status ?? null;
                   const isApproved  = status === "approved";
@@ -550,9 +625,10 @@ export default function TreasurerDashboard() {
                   return (
                     <div
                       key={p.id}
+                      onClick={isApproved ? () => handleProgrammeSelect(p) : undefined}
                       className={`flex items-center justify-between rounded-xl border px-4 py-3 transition ${
                         isApproved
-                          ? isSelected ? "border-red-900 bg-red-50" : "border-gray-200 bg-white"
+                          ? `cursor-pointer ${isSelected ? "border-red-900 bg-red-50" : "border-gray-200 bg-white hover:border-red-300 hover:bg-red-50/40"}`
                           : "border-gray-100 bg-gray-50"
                       }`}
                     >
@@ -571,7 +647,7 @@ export default function TreasurerDashboard() {
                             title={atLimit ? "Selesaikan permohonan sedia ada dahulu" : ""}
                             className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-red-800 hover:bg-red-50 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
                           >
-                            Minta Akses
+                            Mohon Akses
                           </button>
                         )}
 
@@ -580,25 +656,6 @@ export default function TreasurerDashboard() {
                           <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
                             Menunggu Kelulusan
                           </span>
-                        )}
-
-                        {/* Approved */}
-                        {isApproved && (
-                          <div className="flex items-center gap-2">
-                            <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700">
-                              Diluluskan
-                            </span>
-                            <button
-                              onClick={() => handleProgrammeSelect(p)}
-                              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
-                                isSelected
-                                  ? "border-red-900 bg-red-900 text-white"
-                                  : "border-red-800 text-red-800 hover:bg-red-50"
-                              }`}
-                            >
-                              {isSelected ? "✓ Dipilih" : "Pilih"}
-                            </button>
-                          </div>
                         )}
 
                         {/* Revoked — can re-request via confirmation page */}
@@ -622,6 +679,30 @@ export default function TreasurerDashboard() {
                   );
                 })}
               </div>
+
+              {progTotalPages > 1 && (
+                <div className="mt-4 flex items-center justify-between">
+                  <button
+                    onClick={() => setProgPage(p => Math.max(1, p - 1))}
+                    disabled={progPage === 1}
+                    aria-label="Halaman sebelumnya"
+                    className="rounded-lg border border-gray-200 bg-white p-1.5 text-gray-700 transition hover:border-red-800 hover:bg-red-50 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                  </button>
+                  <span className="text-xs text-gray-500">
+                    {progPage} / {progTotalPages}
+                  </span>
+                  <button
+                    onClick={() => setProgPage(p => Math.min(progTotalPages, p + 1))}
+                    disabled={progPage === progTotalPages}
+                    aria-label="Halaman seterusnya"
+                    className="rounded-lg border border-gray-200 bg-white p-1.5 text-gray-700 transition hover:border-red-800 hover:bg-red-50 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                  </button>
+                </div>
+              )}
             </div>
           )
         )}
@@ -629,8 +710,11 @@ export default function TreasurerDashboard() {
         {/* Financial summary */}
         {selectedProgramme && (
           <>
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-red-800">
-              Gambaran Kewangan — {selectedProgramme.code}
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-red-800">
+              Rumusan Kewangan
+            </p>
+            <p className="mb-3 text-xs text-gray-400">
+              Klik pada kad di bawah untuk melihat butiran.
             </p>
             <div className="mb-8 grid gap-4 md:grid-cols-3">
               <button
@@ -639,7 +723,6 @@ export default function TreasurerDashboard() {
               >
                 <p className="text-xs font-semibold uppercase tracking-wider text-green-600">Jumlah Pendapatan</p>
                 <h2 className="mt-2 text-2xl font-bold text-gray-900">{val ?? `RM ${summary.totalIncome.toFixed(2)}`}</h2>
-                <p className="mt-1.5 text-xs text-gray-400">Klik untuk lihat entri</p>
               </button>
               <button
                 onClick={() => openTxnModal("expense")}
@@ -647,7 +730,6 @@ export default function TreasurerDashboard() {
               >
                 <p className="text-xs font-semibold uppercase tracking-wider text-red-600">Jumlah Perbelanjaan</p>
                 <h2 className="mt-2 text-2xl font-bold text-gray-900">{val ?? `RM ${summary.totalExpense.toFixed(2)}`}</h2>
-                <p className="mt-1.5 text-xs text-gray-400">Klik untuk lihat entri</p>
               </button>
               {(() => {
                 const bal    = summary.balance;
@@ -658,12 +740,11 @@ export default function TreasurerDashboard() {
                     className={`rounded-2xl border border-gray-200 bg-white p-5 shadow-sm text-left transition hover:shadow-md ${isRugi ? "hover:border-red-400" : "hover:border-blue-400"}`}
                   >
                     <p className={`text-xs font-semibold uppercase tracking-wider ${isRugi ? "text-red-600" : "text-blue-600"}`}>
-                      {isRugi ? "Rugi" : "Untung"}
+                      {isRugi ? "Jumlah Rugi" : "Jumlah Untung"}
                     </p>
                     <h2 className={`mt-2 text-2xl font-bold ${isRugi ? "text-red-600" : "text-gray-900"}`}>
                       {val ?? `RM ${bal.toFixed(2)}`}
                     </h2>
-                    <p className="mt-1.5 text-xs text-gray-400">Klik untuk lihat semua entri</p>
                   </button>
                 );
               })()}
@@ -712,6 +793,43 @@ export default function TreasurerDashboard() {
           </>
         )}
       </div>
+
+      {/* ── Cancel access request confirmation ── */}
+      {cancelTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-100">
+              <svg className="h-7 w-7 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </div>
+            <h3 className="mb-2 text-base font-bold text-gray-900">Batalkan Permohonan?</h3>
+            <p className="mb-1 text-sm text-gray-600">
+              <span className="font-semibold text-gray-800">{cancelTarget.programmeCode} — {cancelTarget.programmeName}</span>
+            </p>
+            <p className="mb-6 text-sm text-amber-700">
+              Jika dibatalkan, anda <strong>tidak akan dapat memohon semula</strong> untuk program ini melainkan dibenarkan oleh Bendahari Kelab.
+            </p>
+            {cancelError && <p className="mb-4 text-xs text-red-600">{cancelError}</p>}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCancelTarget(null)}
+                disabled={cancelling}
+                className="flex-1 rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+              >
+                Tidak, Kekalkan
+              </button>
+              <button
+                onClick={handleCancelRequest}
+                disabled={cancelling}
+                className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
+              >
+                {cancelling ? "Membatalkan..." : "Ya, Batalkan"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Transaction detail modal ── */}
       {txnModal && (
@@ -772,7 +890,22 @@ export default function TreasurerDashboard() {
                         </th>
                       ))}
                       {txnModal === "all" && (
-                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-red-100">Jenis</th>
+                        <th
+                          onClick={() => handleTxnSort("jenis")}
+                          className="cursor-pointer select-none px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-red-100 hover:bg-red-800"
+                        >
+                          <span className="inline-flex items-center gap-1">
+                            Jenis
+                            <span className="inline-flex flex-col leading-none">
+                              <svg width="8" height="5" viewBox="0 0 8 5" className="mb-0.5">
+                                <polygon points="4,0 8,5 0,5" fill={txnSort.col === "jenis" && txnSort.dir === "asc" ? "white" : "rgba(255,255,255,0.3)"} />
+                              </svg>
+                              <svg width="8" height="5" viewBox="0 0 8 5">
+                                <polygon points="4,5 8,0 0,0" fill={txnSort.col === "jenis" && txnSort.dir === "desc" ? "white" : "rgba(255,255,255,0.3)"} />
+                              </svg>
+                            </span>
+                          </span>
+                        </th>
                       )}
                       <th
                         onClick={() => handleTxnSort("jumlah")}
@@ -793,7 +926,7 @@ export default function TreasurerDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {sortedTxnList.map(t => (
+                    {pagedTxnList.map(t => (
                       <tr key={t.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-sm text-gray-600">{t.date}</td>
                         <td className="px-4 py-3 text-sm text-gray-800">{t.description || <span className="text-gray-400">—</span>}</td>
@@ -864,6 +997,31 @@ export default function TreasurerDashboard() {
                     </span>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Pagination — income/expense views only */}
+            {!txnLoading && txnModal !== "all" && txnTotalPages > 1 && (
+              <div className="flex items-center justify-between border-t border-gray-100 px-6 py-3">
+                <button
+                  onClick={() => setTxnPage(p => Math.max(1, p - 1))}
+                  disabled={txnPage === 1}
+                  aria-label="Halaman sebelumnya"
+                  className="rounded-lg border border-gray-200 bg-white p-1.5 text-gray-700 transition hover:border-red-800 hover:bg-red-50 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                </button>
+                <span className="text-xs text-gray-500">
+                  {txnPage} / {txnTotalPages}
+                </span>
+                <button
+                  onClick={() => setTxnPage(p => Math.min(txnTotalPages, p + 1))}
+                  disabled={txnPage === txnTotalPages}
+                  aria-label="Halaman seterusnya"
+                  className="rounded-lg border border-gray-200 bg-white p-1.5 text-gray-700 transition hover:border-red-800 hover:bg-red-50 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                </button>
               </div>
             )}
           </div>
