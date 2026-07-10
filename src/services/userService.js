@@ -11,6 +11,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../firebase/config";
+import { encryptField } from "../utils/fieldEncryption";
 
 const usersRef = collection(db, "users");
 
@@ -31,16 +32,28 @@ export async function getEmailByUsername(username) {
   return snap.data().email;
 }
 
+export async function isEmailTaken(email) {
+  const normalized = (email || "").trim().toLowerCase();
+  if (!normalized) return false;
+  const snapshot = await getDocs(usersRef);
+  return snapshot.docs.some((d) => (d.data().email ?? "").trim().toLowerCase() === normalized);
+}
+
 export async function createUserProfile(uid, data) {
   const username = (data.email || "").split("@")[0].toLowerCase();
+  const [encMatricNumber, encIcNumber, encPhone] = await Promise.all([
+    encryptField(data.matricNumber ?? ""),
+    encryptField(data.icNumber     ?? ""),
+    encryptField(data.phone        ?? ""),
+  ]);
   await setDoc(doc(db, "users", uid), {
     email:        data.email,
     username:     username,
     role:         data.role,
     fullName:     data.fullName     ?? "",
-    matricNumber: data.matricNumber ?? "",
-    icNumber:     data.icNumber     ?? "",
-    phone:        data.phone        ?? "",
+    matricNumber: encMatricNumber,
+    icNumber:     encIcNumber,
+    phone:        encPhone,
     club:         data.role === "bendahari_kelab" ? (data.club ?? "") : "",
     clubs:        data.role === "advisor" ? (data.clubs ?? []).filter(Boolean) : [],
     category:     data.role === "pegawai" ? (data.category ?? "") : "",
@@ -85,11 +98,16 @@ export async function updateAdvisorClubs(uid, clubs) {
 
 // Self-service: user edits their own personal details (the same fields collected at registration)
 export async function updateUserProfile(uid, { fullName, matricNumber, icNumber, phone }) {
+  const [encMatricNumber, encIcNumber, encPhone] = await Promise.all([
+    encryptField((matricNumber ?? "").trim().toUpperCase()),
+    encryptField((icNumber     ?? "").trim()),
+    encryptField((phone        ?? "").trim()),
+  ]);
   await updateDoc(doc(db, "users", uid), {
     fullName:     (fullName ?? "").trim().toUpperCase(),
-    matricNumber: (matricNumber ?? "").trim().toUpperCase(),
-    icNumber:     (icNumber ?? "").trim(),
-    phone:        (phone ?? "").trim(),
+    matricNumber: encMatricNumber,
+    icNumber:     encIcNumber,
+    phone:        encPhone,
     updatedAt:    serverTimestamp(),
   });
 }

@@ -6,9 +6,10 @@ import {
   updateProgramme,
   deleteProgramme,
   isProgrammeCodeTaken,
+  isProgrammeNameTaken,
 } from "../services/programmeService";
 import PageHeader from "../components/PageHeader";
-import { CLUB_CATEGORIES } from "../config/clubsConfig";
+import { CLUB_CATEGORIES, ALL_CLUBS } from "../config/clubsConfig";
 
 const CATEGORIES = Object.keys(CLUB_CATEGORIES);
 
@@ -19,6 +20,9 @@ Object.entries(CLUB_CATEGORIES).forEach(([cat, clubs]) => {
 
 const clubsForCategory = (category) =>
   category ? [...(CLUB_CATEGORIES[category] ?? [])].sort((a, b) => a.localeCompare(b)) : [];
+
+// Kod program must never contain spaces or dashes — stripped as the admin types.
+const stripCodeFormat = (v) => v.replace(/[\s-]+/g, "");
 
 const PROGRAMMES_PAGE_SIZE = 20;
 
@@ -31,12 +35,23 @@ export default function ProgrammeManagementPage() {
   const [programmesPage, setProgrammesPage] = useState(1);
   const [search, setSearch]                 = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [clubFilter, setClubFilter]                 = useState("");
+  const [clubFilterSearch, setClubFilterSearch]     = useState("");
+  const [showClubFilterOptions, setShowClubFilterOptions] = useState(false);
+  const clubFilterRef = useRef(null);
+
+  const [sortBy, setSortBy]   = useState("code"); // "club" | "code" | "name"
+  const [sortDir, setSortDir] = useState("asc");  // "asc" | "desc"
 
   const [form, setForm]               = useState({ category: "", club: "", code: "", name: "" });
   const [formError, setFormError]     = useState({});
   const [showAddConfirm, setShowAddConfirm] = useState(false);
   const [submitting, setSubmitting]   = useState(false);
   const [addSuccess, setAddSuccess]   = useState(false);
+
+  const [liveWarning, setLiveWarning] = useState({ code: "", name: "" });
+  const codeCheckRef = useRef(0);
+  const nameCheckRef = useRef(0);
 
   const [clubSearch, setClubSearch]       = useState("");
   const [showClubOptions, setShowClubOptions] = useState(false);
@@ -70,14 +85,51 @@ export default function ProgrammeManagementPage() {
 
   useEffect(() => { load(); }, []);
 
-  // Close club dropdown on outside click
+  // Close club dropdowns on outside click
   useEffect(() => {
     const handler = (e) => {
       if (clubRef.current && !clubRef.current.contains(e.target)) setShowClubOptions(false);
+      if (clubFilterRef.current && !clubFilterRef.current.contains(e.target)) setShowClubFilterOptions(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  // Live-check whether the typed programme code is already in use
+  useEffect(() => {
+    const code = form.code.trim();
+    if (!code) { setLiveWarning((p) => ({ ...p, code: "" })); return; }
+    const reqId = ++codeCheckRef.current;
+    const timer = setTimeout(async () => {
+      try {
+        const taken = await isProgrammeCodeTaken(code);
+        if (codeCheckRef.current === reqId) {
+          setLiveWarning((p) => ({ ...p, code: taken ? `Kod "${code.toUpperCase()}" sudah digunakan.` : "" }));
+        }
+      } catch {
+        // ignore live-check failures — final check still runs on submit
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [form.code]);
+
+  // Live-check whether the typed programme name is already in use
+  useEffect(() => {
+    const name = form.name.trim();
+    if (!name) { setLiveWarning((p) => ({ ...p, name: "" })); return; }
+    const reqId = ++nameCheckRef.current;
+    const timer = setTimeout(async () => {
+      try {
+        const taken = await isProgrammeNameTaken(name);
+        if (nameCheckRef.current === reqId) {
+          setLiveWarning((p) => ({ ...p, name: taken ? `Nama program "${name}" sudah digunakan.` : "" }));
+        }
+      } catch {
+        // ignore live-check failures
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [form.name]);
 
   const filteredClubOptions = useMemo(
     () => clubsForCategory(form.category).filter(c => c.toLowerCase().includes(clubSearch.toLowerCase())),
@@ -91,28 +143,57 @@ export default function ProgrammeManagementPage() {
     setShowClubOptions(false);
   };
 
+  const clubFilterOptions = useMemo(() => {
+    const base = categoryFilter ? clubsForCategory(categoryFilter) : ALL_CLUBS;
+    return base.filter(c => c.toLowerCase().includes(clubFilterSearch.toLowerCase()));
+  }, [categoryFilter, clubFilterSearch]);
+
+  const handleClubFilterSelect = (club) => {
+    setClubFilter(club);
+    setClubFilterSearch(club);
+    setShowClubFilterOptions(false);
+  };
+
   const filteredProgrammes = useMemo(() => {
     const q = search.trim().toLowerCase();
     return programmes.filter((item) => {
       if (categoryFilter && CLUB_TO_CATEGORY[item.club] !== categoryFilter) return false;
+      if (clubFilter && item.club !== clubFilter) return false;
       if (!q) return true;
       return (
-        (item.club ?? "").toLowerCase().includes(q) ||
         (item.code ?? "").toLowerCase().includes(q) ||
         (item.name ?? "").toLowerCase().includes(q)
       );
     });
-  }, [programmes, search, categoryFilter]);
+  }, [programmes, search, categoryFilter, clubFilter]);
 
-  const programmesTotalPages = Math.max(1, Math.ceil(filteredProgrammes.length / PROGRAMMES_PAGE_SIZE));
-  const pagedProgrammes = filteredProgrammes.slice(
+  const sortedProgrammes = useMemo(() => {
+    const list = [...filteredProgrammes];
+    list.sort((a, b) => {
+      const cmp = (a[sortBy] ?? "").toString().localeCompare((b[sortBy] ?? "").toString(), undefined, { sensitivity: "base" });
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return list;
+  }, [filteredProgrammes, sortBy, sortDir]);
+
+  const handleSort = (col) => {
+    if (sortBy === col) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(col);
+      setSortDir("asc");
+    }
+  };
+
+  const programmesTotalPages = Math.max(1, Math.ceil(sortedProgrammes.length / PROGRAMMES_PAGE_SIZE));
+  const pagedProgrammes = sortedProgrammes.slice(
     (programmesPage - 1) * PROGRAMMES_PAGE_SIZE,
     programmesPage * PROGRAMMES_PAGE_SIZE
   );
 
   useEffect(() => {
     setProgrammesPage(1);
-  }, [search, categoryFilter]);
+  }, [search, categoryFilter, clubFilter, sortBy, sortDir]);
 
   useEffect(() => {
     if (programmesPage > programmesTotalPages) setProgrammesPage(programmesTotalPages);
@@ -148,6 +229,7 @@ export default function ProgrammeManagementPage() {
       await createProgramme({ ...form, status: "approved" });
       setForm({ category: "", club: "", code: "", name: "" });
       setClubSearch("");
+      setLiveWarning({ code: "", name: "" });
       setShowAddConfirm(false);
       setAddSuccess(true);
       await load();
@@ -174,6 +256,14 @@ export default function ProgrammeManagementPage() {
     setErrorMsg("");
     const errors = validateForm(editForm);
     if (Object.keys(errors).length > 0) { setErrorMsg("Sila lengkapkan semua medan."); return; }
+
+    const original = programmes.find((p) => p.id === editingId);
+    const unchanged = original
+      && editForm.club === original.club
+      && editForm.code.trim().toUpperCase() === (original.code ?? "").trim().toUpperCase()
+      && editForm.name.trim() === (original.name ?? "").trim();
+    if (unchanged) { setEditingId(null); return; }
+
     setShowEditConfirm(true);
   };
 
@@ -321,10 +411,14 @@ export default function ProgrammeManagementPage() {
                 type="text"
                 placeholder="cth. P001"
                 value={form.code}
-                onChange={(e) => { setForm((p) => ({ ...p, code: e.target.value })); setFormError((p) => ({ ...p, code: "" })); }}
+                onChange={(e) => { setForm((p) => ({ ...p, code: stripCodeFormat(e.target.value) })); setFormError((p) => ({ ...p, code: "" })); }}
                 className={formError.code ? inputErr : inputClass}
               />
-              {formError.code && <p className="mt-1 text-xs text-red-600">{formError.code}</p>}
+              {formError.code ? (
+                <p className="mt-1 text-xs text-red-600">{formError.code}</p>
+              ) : liveWarning.code ? (
+                <p className="mt-1 text-xs text-amber-600">{liveWarning.code}</p>
+              ) : null}
             </div>
             <div>
               <label htmlFor="prog-name" className="mb-1.5 block text-sm font-medium text-gray-700">
@@ -338,7 +432,11 @@ export default function ProgrammeManagementPage() {
                 onChange={(e) => { setForm((p) => ({ ...p, name: e.target.value })); setFormError((p) => ({ ...p, name: "" })); }}
                 className={formError.name ? inputErr : inputClass}
               />
-              {formError.name && <p className="mt-1 text-xs text-red-600">{formError.name}</p>}
+              {formError.name ? (
+                <p className="mt-1 text-xs text-red-600">{formError.name}</p>
+              ) : liveWarning.name ? (
+                <p className="mt-1 text-xs text-amber-600">{liveWarning.name}</p>
+              ) : null}
             </div>
             <div className="flex items-end sm:col-span-2">
               <button
@@ -369,7 +467,7 @@ export default function ProgrammeManagementPage() {
                 </svg>
                 <input
                   type="text"
-                  placeholder="Cari nama kelab, kod atau nama program..."
+                  placeholder="Cari kod atau nama program..."
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="w-full rounded-xl border border-gray-200 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-red-400 focus:ring-1 focus:ring-red-100"
@@ -377,12 +475,60 @@ export default function ProgrammeManagementPage() {
               </div>
               <select
                 value={categoryFilter}
-                onChange={e => setCategoryFilter(e.target.value)}
+                onChange={e => {
+                  setCategoryFilter(e.target.value);
+                  setClubFilter("");
+                  setClubFilterSearch("");
+                }}
                 className="rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-red-400 focus:ring-1 focus:ring-red-100 sm:w-56"
               >
                 <option value="">Semua Kategori</option>
                 {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
+              <div ref={clubFilterRef} className="relative sm:w-56">
+                <input
+                  type="text"
+                  placeholder="Cari / tapis kelab..."
+                  value={clubFilterSearch}
+                  onChange={(e) => {
+                    setClubFilterSearch(e.target.value);
+                    setShowClubFilterOptions(true);
+                    if (clubFilter && e.target.value !== clubFilter) setClubFilter("");
+                  }}
+                  onFocus={() => setShowClubFilterOptions(true)}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-red-400 focus:ring-1 focus:ring-red-100"
+                />
+                {clubFilterSearch && (
+                  <button
+                    type="button"
+                    onClick={() => { setClubFilter(""); setClubFilterSearch(""); setShowClubFilterOptions(false); }}
+                    aria-label="Kosongkan tapisan kelab"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    ✕
+                  </button>
+                )}
+                {showClubFilterOptions && clubFilterOptions.length > 0 && (
+                  <ul className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg sm:w-72">
+                    {clubFilterOptions.map((club) => (
+                      <li
+                        key={club}
+                        onMouseDown={() => handleClubFilterSelect(club)}
+                        className={`cursor-pointer px-4 py-3 text-sm transition hover:bg-red-50 hover:text-red-800 ${
+                          clubFilter === club ? "bg-red-50 font-semibold text-red-800" : "text-gray-700"
+                        }`}
+                      >
+                        {club}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {showClubFilterOptions && clubFilterSearch.length > 0 && clubFilterOptions.length === 0 && (
+                  <div className="absolute z-10 mt-1 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-400 shadow-lg sm:w-72">
+                    Tiada kelab dijumpai.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -397,9 +543,24 @@ export default function ProgrammeManagementPage() {
               <table className="min-w-full">
                 <thead>
                   <tr className="bg-red-900 text-left">
-                    <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Kelab</th>
-                    <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Kod</th>
-                    <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Nama Program</th>
+                    {[
+                      { key: "club", label: "Kelab" },
+                      { key: "code", label: "Kod" },
+                      { key: "name", label: "Nama Program" },
+                    ].map(({ key, label }) => (
+                      <th key={key} className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">
+                        <button
+                          type="button"
+                          onClick={() => handleSort(key)}
+                          className="flex items-center gap-1 uppercase tracking-wider hover:text-white"
+                        >
+                          {label}
+                          <span className="text-red-300">
+                            {sortBy === key ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
+                          </span>
+                        </button>
+                      </th>
+                    ))}
                     <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Tindakan</th>
                   </tr>
                 </thead>
@@ -432,7 +593,7 @@ export default function ProgrammeManagementPage() {
                           <td className="px-4 py-3">
                             <input
                               value={editForm.code}
-                              onChange={(e) => setEditForm((p) => ({ ...p, code: e.target.value }))}
+                              onChange={(e) => setEditForm((p) => ({ ...p, code: stripCodeFormat(e.target.value) }))}
                               className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-red-500"
                             />
                           </td>

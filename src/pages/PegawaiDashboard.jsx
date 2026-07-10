@@ -6,7 +6,7 @@ import PageHeader from "../components/PageHeader";
 
 export default function PegawaiDashboard() {
   const navigate = useNavigate();
-  const { currentUser, userProfile, logout } = useAuth();
+  const { currentUser, userProfile, logout, selectedClub } = useAuth();
 
   const [pendingCount, setPendingCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -17,6 +17,12 @@ export default function PegawaiDashboard() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (userProfile?.category && !selectedClub) {
+      navigate("/pegawai/pilih-kelab", { replace: true });
+    }
+  }, [userProfile, selectedClub, navigate]);
 
   const handleLogout = async () => { await logout(); navigate("/login"); };
 
@@ -35,14 +41,30 @@ export default function PegawaiDashboard() {
 
       <div className="mx-auto max-w-7xl space-y-6 p-6">
 
-        <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
-          <span className="font-semibold">Log masuk sebagai: </span>{currentUser?.email}
-          <span className="mx-2 text-indigo-300">·</span>Pegawai Kewangan
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+          <div>
+            <span className="font-semibold">Log masuk sebagai: </span>{currentUser?.email}
+            <span className="mx-2 text-indigo-300">·</span>Pegawai Kewangan
+            {category && (
+              <>
+                <span className="mx-2 text-indigo-300">·</span>
+                <span className="font-semibold">Kategori: </span>{category}
+              </>
+            )}
+            {selectedClub && (
+              <>
+                <span className="mx-2 text-indigo-300">·</span>
+                <span className="font-semibold">Kelab Diselia: </span>{selectedClub}
+              </>
+            )}
+          </div>
           {category && (
-            <>
-              <span className="mx-2 text-indigo-300">·</span>
-              <span className="font-semibold">Kategori: </span>{category}
-            </>
+            <Link
+              to="/pegawai/pilih-kelab"
+              className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-medium text-indigo-700 shadow-sm transition hover:bg-indigo-100"
+            >
+              Tukar Kelab
+            </Link>
           )}
         </div>
 
@@ -84,7 +106,7 @@ export default function PegawaiDashboard() {
             <div>
               <p className="text-sm font-bold text-gray-900">Penyata Kewangan Kelab</p>
               <p className="mt-0.5 text-xs text-gray-500">
-                {category ? `Lihat laporan kelab kategori ${category}` : "Pilih kelab dan program untuk lihat laporan"}
+                {selectedClub ? `Lihat rumusan kewangan bagi ${selectedClub}` : "Pilih kelab untuk lihat laporan"}
               </p>
             </div>
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-100 text-green-700 text-lg font-bold">↓</span>

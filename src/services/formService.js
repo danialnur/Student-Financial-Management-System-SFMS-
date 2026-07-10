@@ -2,6 +2,7 @@ import { db } from "../firebase/config";
 import {
   collection,
   addDoc,
+  deleteDoc,
   getDocs,
   query,
   where,
@@ -143,4 +144,9 @@ export const updateBorangStatus = async (id, status, reviewer, additionalData = 
     reviewedAt: serverTimestamp(),
     ...additionalData,
   });
+};
+
+// Admin-only — permanently removes a form submission (see firestore.rules).
+export const deleteBorang = async (id) => {
+  await deleteDoc(doc(db, "formSubmissions", id));
 };

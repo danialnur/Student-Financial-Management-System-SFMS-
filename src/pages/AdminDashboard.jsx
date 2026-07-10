@@ -17,10 +17,26 @@ const DETAIL_PAGE_SIZE = 10;
 const fmtDate = (ts) =>
   ts?.toDate ? ts.toDate().toLocaleDateString("ms-MY", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
+const fmtRM = (v) => `RM ${Number(v || 0).toFixed(2)}`;
+
+// Shared by pending/approved/rejected — identical columns and row rendering.
+const SUBMISSION_COLUMNS = [
+  { label: "Tarikh",        sortValue: (s) => s.createdAt?.seconds ?? 0 },
+  { label: "Borang",        sortValue: (s) => s.formName || s.formType || "" },
+  { label: "Kelab",         sortValue: (s) => s.createdByClub || "" },
+  { label: "Dihantar Oleh", sortValue: (s) => s.createdByEmail || "" },
+  { label: "Jenis",         sortValue: (s) => s.kind === "pdf" ? "PDF" : "Borang" },
+];
+
 const DETAIL_CONFIG = {
   users: {
     title:   "Senarai Pengguna",
-    columns: ["Nama Pengguna", "E-mel", "Peranan", "Kelab / Kategori"],
+    columns: [
+      { label: "Nama Pengguna",     sortValue: (u) => u.username || "" },
+      { label: "E-mel",             sortValue: (u) => u.email || "" },
+      { label: "Peranan",           sortValue: (u) => ROLE_LABELS[u.role] ?? u.role ?? "" },
+      { label: "Kelab / Kategori",  sortValue: (u) => u.club || (u.clubs ?? []).join(", ") || u.category || "" },
+    ],
     getRows: (summary) => summary.users,
     renderRow: (u) => [
       u.username || "—",
@@ -31,7 +47,13 @@ const DETAIL_CONFIG = {
   },
   transactions: {
     title:   "Senarai Transaksi",
-    columns: ["Tarikh", "Kod Program", "Jenis", "Jumlah", "Oleh"],
+    columns: [
+      { label: "Tarikh",      sortValue: (t) => t.date || "" },
+      { label: "Kod Program", sortValue: (t) => t.programmeCode || "" },
+      { label: "Jenis",       sortValue: (t) => t.type || "" },
+      { label: "Jumlah",      sortValue: (t) => Number(t.amount || 0) },
+      { label: "Oleh",        sortValue: (t) => t.createdByEmail || "" },
+    ],
     getRows: (summary) => summary.transactions,
     renderRow: (t) => [
       t.date || "—",
@@ -43,19 +65,19 @@ const DETAIL_CONFIG = {
   },
   pending: {
     title:    "Borang & PDF Menunggu Kelulusan",
-    columns:  ["Tarikh", "Borang", "Kelab", "Dihantar Oleh", "Jenis"],
+    columns:  SUBMISSION_COLUMNS,
     getRows:  (summary) => summary.submissions.filter(s => ["menunggu", "disemak"].includes(s.status)),
     renderRow: submissionRow,
   },
   approved: {
     title:    "Borang & PDF Diluluskan",
-    columns:  ["Tarikh", "Borang", "Kelab", "Dihantar Oleh", "Jenis"],
+    columns:  SUBMISSION_COLUMNS,
     getRows:  (summary) => summary.submissions.filter(s => ["diluluskan", "selesai"].includes(s.status)),
     renderRow: submissionRow,
   },
   rejected: {
     title:    "Borang & PDF Ditolak",
-    columns:  ["Tarikh", "Borang", "Kelab", "Dihantar Oleh", "Jenis"],
+    columns:  SUBMISSION_COLUMNS,
     getRows:  (summary) => summary.submissions.filter(s => s.status === "ditolak"),
     renderRow: submissionRow,
   },
@@ -75,6 +97,7 @@ export default function AdminDashboard() {
   const { currentUser, userProfile, logout } = useAuth();
   const [summary, setSummary] = useState({
     totalUsers: 0, totalTransactions: 0, pendingCount: 0, approvedCount: 0, rejectedCount: 0,
+    totalIncome: 0, totalExpense: 0, balance: 0,
     users: [], transactions: [], submissions: [],
   });
   const [loading, setLoading] = useState(true);
@@ -98,14 +121,43 @@ export default function AdminDashboard() {
 
   const val = loading ? "—" : null;
 
+  const [sortCol, setSortCol] = useState(0);
+  const [sortDir, setSortDir] = useState("asc"); // "asc" | "desc"
+
   const cfg  = detailModal ? DETAIL_CONFIG[detailModal] : null;
   const rows = useMemo(() => (cfg ? cfg.getRows(summary) : []), [cfg, summary]);
-  const totalPages = Math.max(1, Math.ceil(rows.length / DETAIL_PAGE_SIZE));
-  const pagedRows   = rows.slice((detailPage - 1) * DETAIL_PAGE_SIZE, detailPage * DETAIL_PAGE_SIZE);
+
+  const sortedRows = useMemo(() => {
+    const sortValue = cfg?.columns[sortCol]?.sortValue;
+    if (!sortValue) return rows;
+    const list = [...rows];
+    list.sort((a, b) => {
+      const av = sortValue(a), bv = sortValue(b);
+      const cmp = (typeof av === "number" && typeof bv === "number")
+        ? av - bv
+        : String(av).localeCompare(String(bv), undefined, { sensitivity: "base" });
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return list;
+  }, [rows, cfg, sortCol, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / DETAIL_PAGE_SIZE));
+  const pagedRows   = sortedRows.slice((detailPage - 1) * DETAIL_PAGE_SIZE, detailPage * DETAIL_PAGE_SIZE);
+
+  const handleSort = (colIdx) => {
+    if (sortCol === colIdx) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortCol(colIdx);
+      setSortDir("asc");
+    }
+  };
 
   const openDetail = (type) => {
     setDetailModal(type);
     setDetailPage(1);
+    setSortCol(0);
+    setSortDir("asc");
   };
 
   return (
@@ -153,6 +205,37 @@ export default function AdminDashboard() {
           </button>
         </div>
 
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-red-800">
+          Rumusan Kewangan
+        </p>
+        <p className="mb-3 text-xs text-gray-400">
+          Jumlah keseluruhan transaksi merentasi semua kelab dalam sistem.
+        </p>
+        <div className="mb-8 grid gap-4 md:grid-cols-3">
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wider text-green-600">Jumlah Pendapatan</p>
+            <h2 className="mt-2 text-2xl font-bold text-gray-900">{val ?? fmtRM(summary.totalIncome)}</h2>
+          </div>
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wider text-red-600">Jumlah Perbelanjaan</p>
+            <h2 className="mt-2 text-2xl font-bold text-gray-900">{val ?? fmtRM(summary.totalExpense)}</h2>
+          </div>
+          {(() => {
+            const bal    = summary.balance;
+            const isRugi = bal < 0;
+            return (
+              <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                <p className={`text-xs font-semibold uppercase tracking-wider ${isRugi ? "text-red-600" : "text-blue-600"}`}>
+                  {isRugi ? "Jumlah Rugi" : "Jumlah Untung"}
+                </p>
+                <h2 className={`mt-2 text-2xl font-bold ${isRugi ? "text-red-600" : "text-gray-900"}`}>
+                  {val ?? fmtRM(bal)}
+                </h2>
+              </div>
+            );
+          })()}
+        </div>
+
         <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-red-800">
           Tindakan Pantas
         </p>
@@ -187,7 +270,7 @@ export default function AdminDashboard() {
               ◈
             </div>
             <h2 className="font-semibold text-gray-900">Urus Program</h2>
-            <p className="mt-1 text-sm text-gray-500">Tambah atau buang kod program yang digunakan dalam transaksi.</p>
+            <p className="mt-1 text-sm text-gray-500">Tambah, kemaskini atau buang program yang terlibat dalam sistem.</p>
           </Link>
         </div>
       </div>
@@ -218,9 +301,18 @@ export default function AdminDashboard() {
                 <table className="min-w-full">
                   <thead className="sticky top-0 bg-red-900">
                     <tr>
-                      {cfg.columns.map((col) => (
-                        <th key={col} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-red-100">
-                          {col}
+                      {cfg.columns.map((col, i) => (
+                        <th key={col.label} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-red-100">
+                          <button
+                            type="button"
+                            onClick={() => handleSort(i)}
+                            className="flex items-center gap-1 uppercase tracking-wider hover:text-white"
+                          >
+                            {col.label}
+                            <span className="text-red-300">
+                              {sortCol === i ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
+                            </span>
+                          </button>
                         </th>
                       ))}
                     </tr>

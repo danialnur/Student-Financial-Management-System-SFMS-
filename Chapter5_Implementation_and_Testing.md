@@ -111,6 +111,39 @@ New users registered at `/register` by providing a full name, matriculation numb
 
 Users who had forgotten their credentials could trigger a password reset from the login screen. Upon clicking "Lupa Kata Laluan?" (Forgot Password?), a secondary form was rendered on the same page. Firebase's `sendPasswordResetEmail` function dispatched a reset link to the submitted address after validating its format.
 
+#### 5.2.3.5 Field-Level Encryption of Crucial Data
+
+Beyond authenticating who a user was, the system also protected what was stored about them. Three crucial personally identifiable fields on the user profile — IC number, phone number, and matriculation number — were encrypted at the application level with AES-256-GCM before ever reaching Firestore, implemented in `src/utils/fieldEncryption.js` using the browser's native Web Crypto API.
+
+```js
+// src/utils/fieldEncryption.js
+export async function encryptField(plaintext) {
+  if (plaintext == null || plaintext === "") return plaintext ?? "";
+  const key = await getKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipherBuf = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv }, key, new TextEncoder().encode(String(plaintext))
+  );
+  return `enc:v1:${bytesToBase64(iv)}.${bytesToBase64(new Uint8Array(cipherBuf))}`;
+}
+```
+
+`userService.js` called `encryptField()` immediately before every write to these three fields — at registration (`createUserProfile`) and at self-service profile edits (`updateUserProfile`) — while `AuthContext.jsx` called the matching `decryptField()` exactly once, right after a profile document was fetched from Firestore:
+
+```jsx
+// src/context/AuthContext.jsx
+const [icNumber, phone, matricNumber] = await Promise.all([
+  decryptField(data.icNumber),
+  decryptField(data.phone),
+  decryptField(data.matricNumber),
+]);
+setUserProfile({ ...data, icNumber, phone, matricNumber });
+```
+
+Because decryption happened once at the context layer, every other screen that read `userProfile` — the profile editor, and the auto-fill logic that copies a treasurer's IC number and phone number into a UTM financial form — continued to work against plain values without any further changes.
+
+The AES-256 key was supplied to the frontend build through an environment variable rather than committed to source control, reflecting a deliberate trade-off for a project with no backend server of its own: the key is necessarily present in the deployed JavaScript bundle. This closes the gap against casual exposure of the raw Firestore data (e.g. through the Firebase console or a database export) while not being resistant to an attacker capable of inspecting the frontend bundle itself — a limitation documented in §4.5.3 and §6.4, and revisited as future work in §6.5. Pre-existing plaintext records were brought in line with the new scheme by a one-off migration script (`scripts/encrypt-user-pii.mjs`), run in a dry-run mode first to report the exact set of affected records before any write was made.
+
 ---
 
 ### 5.2.4 Role-Based Access Control (RBAC)

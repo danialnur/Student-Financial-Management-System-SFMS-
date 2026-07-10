@@ -2,16 +2,17 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   getPendingBorang, getPendingBorangByClub, getPendingBorangByClubs, getPendingBorangByCategory,
-  getIntendedReviewerRole, updateBorangStatus,
+  getIntendedReviewerRole, updateBorangStatus, deleteBorang,
 } from "../services/formService";
 import {
   getPdfSubmissions, getPdfSubmissionsByClub, getPdfSubmissionsByClubs, getPdfSubmissionsByCategory,
-  updatePdfSubmissionStatus,
+  updatePdfSubmissionStatus, deletePdfSubmission,
 } from "../services/pdfSubmissionService";
 import { useAuth } from "../context/AuthContext";
 import PageHeader from "../components/PageHeader";
 import { FORMS_CONFIG } from "../config/formsConfig";
 import { SignaturePanel } from "../components/SignatureCapture";
+import { openPdf, PDF_GENERATORS } from "../utils/borangPdfGenerators";
 
 const SUBMIT_TO_LABELS = { bendahari_kelab: "Bendahari Kelab", advisor: "Penasihat Kelab", pegawai: "Pegawai Kewangan" };
 
@@ -50,6 +51,11 @@ export default function ApprovalPage() {
   // borang and PDF lists.
   const [confirmAction, setConfirmAction]     = useState(null); // { kind:"borang"|"pdf", id, status, label }
   const [actionSuccessMsg, setActionSuccessMsg] = useState("");
+
+  // Admin-only: permanently delete a submission (see firestore.rules — only
+  // admin has delete rights on formSubmissions/pdfSubmissions).
+  const [deleteTarget, setDeleteTarget] = useState(null); // { kind:"borang"|"pdf", item }
+  const [deleting, setDeleting]         = useState(false);
 
   const loadPendingBorang = async () => {
     try {
@@ -292,6 +298,46 @@ export default function ApprovalPage() {
     finally { setPdfActionId(""); }
   };
 
+  // Admin-only — generates the official PDF for a structured (Borang Kewangan
+  // UTM) submission and downloads it, in place of "Lihat" (which opens the
+  // detail modal for other reviewer roles).
+  const handleDownloadBorangPdf = (item) => {
+    const genFn = PDF_GENERATORS[item.formType];
+    const cfg = FORMS_CONFIG.find(f => f.id === item.formType);
+    if (!genFn || !cfg) { setBorangError("Format PDF tidak tersedia untuk jenis borang ini."); return; }
+    const mergedData = { ...item.formData, ...(item.reviewerData ?? {}) };
+    const doc = genFn(mergedData, item.rows, item.submitterSignature ?? null);
+    if (!doc) return;
+    const titleSlug = cfg.title.replace(/[^a-zA-Z0-9\s]/g,"").trim().replace(/\s+/g,"-").toLowerCase();
+    openPdf(doc, `${titleSlug}.pdf`);
+  };
+
+  const handleRequestDelete = (kind, item) => setDeleteTarget({ kind, item });
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    const { kind, item } = deleteTarget;
+    try {
+      setDeleting(true);
+      if (kind === "borang") {
+        await deleteBorang(item.id);
+        await loadPendingBorang();
+      } else {
+        await deletePdfSubmission(item.id, item.pdfPath);
+        await loadPendingPdf();
+      }
+      setDeleteTarget(null);
+      setActionSuccessMsg("Permintaan berjaya dipadam.");
+    } catch (e) {
+      console.error(e);
+      if (kind === "borang") setBorangError("Gagal memadam borang.");
+      else setPdfError("Gagal memadam PDF.");
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleViewBorang = async (item) => {
     setAdvisorData({});
     const cfg = FORMS_CONFIG.find(f => f.id === item.formType);
@@ -344,7 +390,17 @@ export default function ApprovalPage() {
     return null;
   };
 
-  const ActionCell = ({ item, onView, onAction, viewLabel = "Lihat" }) => {
+  const ActionCell = ({ item, onView, onAction, onDelete, viewLabel = "Lihat" }) => {
+    // Admin: no Lulus/Tolak/Selesai — view becomes a PDF download, plus a
+    // permanent-delete action for the request itself.
+    if (userRole === "admin") {
+      return (
+        <div className="flex gap-2 flex-wrap">
+          {onView && <button onClick={onView} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700">Muat Turun PDF</button>}
+          <button onClick={onDelete} className="rounded-lg bg-red-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-800">Padam</button>
+        </div>
+      );
+    }
     if (!canActOn(item)) {
       return (
         <div className="flex flex-col gap-1.5">
@@ -411,7 +467,12 @@ export default function ApprovalPage() {
                           {item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString("ms-MY") : "—"}
                         </td>
                         <td className="px-4 py-3">
-                          <ActionCell item={item} onView={() => handleViewBorang(item)} onAction={(status) => handleRequestBorangAction(item, status)} />
+                          <ActionCell
+                            item={item}
+                            onView={() => (userRole === "admin" ? handleDownloadBorangPdf(item) : handleViewBorang(item))}
+                            onAction={(status) => handleRequestBorangAction(item, status)}
+                            onDelete={() => handleRequestDelete("borang", item)}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -461,6 +522,7 @@ export default function ApprovalPage() {
                             onView={() => window.open(item.pdfUrl, "_blank", "noreferrer")}
                             viewLabel="Lihat PDF"
                             onAction={(status) => handleRequestPdfAction(item, status)}
+                            onDelete={() => handleRequestDelete("pdf", item)}
                           />
                         </td>
                       </tr>
@@ -596,6 +658,29 @@ export default function ApprovalPage() {
             <div className="flex gap-3">
               <button onClick={() => setConfirmAction(null)} className="flex-1 rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50">Batal</button>
               <button onClick={handleConfirmedAction} className="flex-1 rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800">Ya, Teruskan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirm delete popup (admin only) ── */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-100">
+              <svg className="h-7 w-7 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </div>
+            <h3 className="mb-2 text-base font-bold text-gray-900">Padam Permintaan Ini?</h3>
+            <p className="mb-6 text-sm text-gray-600">
+              <span className="font-semibold text-gray-800">{deleteTarget.item.formName}</span> daripada{" "}
+              <span className="font-semibold text-gray-800">{deleteTarget.item.createdByEmail}</span> akan dipadam
+              secara kekal. Tindakan ini tidak boleh dibatalkan.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteTarget(null)} disabled={deleting} className="flex-1 rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50">Batal</button>
+              <button onClick={handleConfirmDelete} disabled={deleting} className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60">{deleting ? "Memadam..." : "Ya, Padam"}</button>
             </div>
           </div>
         </div>

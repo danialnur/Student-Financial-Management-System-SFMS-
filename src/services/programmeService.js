@@ -21,8 +21,11 @@ export async function getAllProgrammes() {
   return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
+// Kod program must never contain spaces or dashes.
+const normalizeCode = (code) => code.trim().toUpperCase().replace(/[\s-]+/g, "");
+
 export async function isProgrammeCodeTaken(code) {
-  const q = query(programmesRef, where("code", "==", code.trim().toUpperCase()));
+  const q = query(programmesRef, where("code", "==", normalizeCode(code)));
   const snapshot = await getDocs(q);
   return !snapshot.empty;
 }
@@ -81,7 +84,7 @@ export async function getProgrammesByTreasurer(uid) {
 
 export async function createProgramme(data) {
   await addDoc(programmesRef, {
-    code:              data.code.trim().toUpperCase(),
+    code:              normalizeCode(data.code),
     name:              data.name.trim(),
     club:              data.club         ?? "",
     treasurerUid:      data.treasurerUid ?? "",
@@ -93,7 +96,7 @@ export async function createProgramme(data) {
 
 export async function updateProgramme(id, data) {
   await updateDoc(doc(db, "programmes", id), {
-    code:      data.code.trim().toUpperCase(),
+    code:      normalizeCode(data.code),
     name:      data.name.trim(),
     club:      data.club ?? "",
     updatedAt: serverTimestamp(),

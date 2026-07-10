@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import PageHeader from "../components/PageHeader";
@@ -7,6 +7,7 @@ import { ALL_CLUBS, CLUB_CATEGORIES } from "../config/clubsConfig";
 import {
   createUserProfile,
   getAllUsers,
+  isEmailTaken,
   removeUserAccess,
   updateUserRole,
   updateAdvisorClubs,
@@ -37,6 +38,12 @@ const userClubText = (item) => {
   return "";
 };
 
+const SORT_ACCESSORS = {
+  email: (item) => item.email ?? "",
+  role:  (item) => roleLabel(item.role) ?? "",
+  club:  (item) => userClubText(item) ?? "",
+};
+
 export default function UserManagementPage() {
   const navigate = useNavigate();
 
@@ -48,10 +55,39 @@ export default function UserManagementPage() {
   const [roleFilter, setRoleFilter] = useState("");
   const [usersPage, setUsersPage]   = useState(1);
 
+  const [clubFilter, setClubFilter]                 = useState("");
+  const [clubFilterSearch, setClubFilterSearch]     = useState("");
+  const [showClubFilterOptions, setShowClubFilterOptions] = useState(false);
+  const clubFilterRef = useRef(null);
+
+  const [sortBy, setSortBy]   = useState("email"); // "email" | "role" | "club"
+  const [sortDir, setSortDir] = useState("asc");   // "asc" | "desc"
+
   const [form, setForm] = useState({ email: "", password: "", role: "treasurer", club: "", clubs: [""], category: "" });
   const [showCreateConfirm, setShowCreateConfirm] = useState(false);
   const [creating, setCreating]                   = useState(false);
   const [createSuccess, setCreateSuccess]         = useState(false);
+
+  const [emailWarning, setEmailWarning] = useState("");
+  const emailCheckRef = useRef(0);
+
+  // Live-check whether the typed e-mel is already registered
+  useEffect(() => {
+    const email = form.email.trim();
+    if (!email) { setEmailWarning(""); return; }
+    const reqId = ++emailCheckRef.current;
+    const timer = setTimeout(async () => {
+      try {
+        const taken = await isEmailTaken(email);
+        if (emailCheckRef.current === reqId) {
+          setEmailWarning(taken ? `Pengguna dengan e-mel "${email}" sudah wujud.` : "");
+        }
+      } catch {
+        // ignore live-check failures — Firebase Auth still rejects a duplicate on submit
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [form.email]);
 
   const [editingUser, setEditingUser]   = useState(null);
   const [editRole, setEditRole]         = useState("");
@@ -101,6 +137,7 @@ export default function UserManagementPage() {
         category: form.category,
       });
       setForm({ email: "", password: "", role: "treasurer", club: "", clubs: [""], category: "" });
+      setEmailWarning("");
       setShowCreateConfirm(false);
       setCreateSuccess(true);
       await loadUsers();
@@ -154,21 +191,67 @@ export default function UserManagementPage() {
     finally { setRemoving(false); }
   };
 
+  const userInClub = (item, club) => {
+    if (item.role === "bendahari_kelab") return item.club === club;
+    if (item.role === "advisor")         return (item.clubs ?? []).includes(club);
+    return false;
+  };
+
+  const clubFilterOptions = useMemo(
+    () => ALL_CLUBS.filter(c => c.toLowerCase().includes(clubFilterSearch.toLowerCase())),
+    [clubFilterSearch]
+  );
+
+  const handleClubFilterSelect = (club) => {
+    setClubFilter(club);
+    setClubFilterSearch(club);
+    setShowClubFilterOptions(false);
+  };
+
+  // Close club filter dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (clubFilterRef.current && !clubFilterRef.current.contains(e.target)) setShowClubFilterOptions(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
     return users.filter(item => {
       if (roleFilter && item.role !== roleFilter) return false;
+      if (clubFilter && !userInClub(item, clubFilter)) return false;
       if (!q) return true;
-      return item.email.toLowerCase().includes(q) || userClubText(item).toLowerCase().includes(q);
+      return item.email.toLowerCase().includes(q);
     });
-  }, [users, search, roleFilter]);
+  }, [users, search, roleFilter, clubFilter]);
 
-  const usersTotalPages = Math.max(1, Math.ceil(filteredUsers.length / USERS_PAGE_SIZE));
-  const pagedUsers = filteredUsers.slice((usersPage - 1) * USERS_PAGE_SIZE, usersPage * USERS_PAGE_SIZE);
+  const sortedUsers = useMemo(() => {
+    const accessor = SORT_ACCESSORS[sortBy] ?? SORT_ACCESSORS.email;
+    const list = [...filteredUsers];
+    list.sort((a, b) => {
+      const cmp = accessor(a).toString().localeCompare(accessor(b).toString(), undefined, { sensitivity: "base" });
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return list;
+  }, [filteredUsers, sortBy, sortDir]);
+
+  const handleSort = (col) => {
+    if (sortBy === col) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(col);
+      setSortDir("asc");
+    }
+  };
+
+  const usersTotalPages = Math.max(1, Math.ceil(sortedUsers.length / USERS_PAGE_SIZE));
+  const pagedUsers = sortedUsers.slice((usersPage - 1) * USERS_PAGE_SIZE, usersPage * USERS_PAGE_SIZE);
 
   useEffect(() => {
     setUsersPage(1);
-  }, [search, roleFilter]);
+  }, [search, roleFilter, clubFilter, sortBy, sortDir]);
 
   useEffect(() => {
     if (usersPage > usersTotalPages) setUsersPage(usersTotalPages);
@@ -222,7 +305,10 @@ export default function UserManagementPage() {
           <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-red-700">Tambah Pengguna Baru</h2>
           <form onSubmit={handleCreateUser} className="space-y-4">
             <div className="grid gap-4 md:grid-cols-3">
-              <input type="email" name="email" placeholder="E-mel pengguna" value={form.email} onChange={handleChange} className={inputClass} />
+              <div>
+                <input type="email" name="email" placeholder="E-mel pengguna" value={form.email} onChange={handleChange} className={inputClass} />
+                {emailWarning && <p className="mt-1 text-xs text-amber-600">{emailWarning}</p>}
+              </div>
               <input type="password" name="password" placeholder="Kata laluan sementara" value={form.password} onChange={handleChange} className={inputClass} />
               <select name="role" value={form.role} onChange={handleChange} className={inputClass}>
                 <option value="treasurer">Bendahari</option>
@@ -274,7 +360,7 @@ export default function UserManagementPage() {
                 </svg>
                 <input
                   type="text"
-                  placeholder="Cari e-mel atau kelab..."
+                  placeholder="Cari e-mel..."
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   className="w-full rounded-xl border border-gray-200 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-red-400 focus:ring-1 focus:ring-red-100"
@@ -290,6 +376,50 @@ export default function UserManagementPage() {
                   <option key={value} value={value}>{meta.label}</option>
                 ))}
               </select>
+              <div ref={clubFilterRef} className="relative sm:w-56">
+                <input
+                  type="text"
+                  placeholder="Cari / tapis kelab..."
+                  value={clubFilterSearch}
+                  onChange={(e) => {
+                    setClubFilterSearch(e.target.value);
+                    setShowClubFilterOptions(true);
+                    if (clubFilter && e.target.value !== clubFilter) setClubFilter("");
+                  }}
+                  onFocus={() => setShowClubFilterOptions(true)}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-red-400 focus:ring-1 focus:ring-red-100"
+                />
+                {clubFilterSearch && (
+                  <button
+                    type="button"
+                    onClick={() => { setClubFilter(""); setClubFilterSearch(""); setShowClubFilterOptions(false); }}
+                    aria-label="Kosongkan tapisan kelab"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    ✕
+                  </button>
+                )}
+                {showClubFilterOptions && clubFilterOptions.length > 0 && (
+                  <ul className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg sm:w-72">
+                    {clubFilterOptions.map((club) => (
+                      <li
+                        key={club}
+                        onMouseDown={() => handleClubFilterSelect(club)}
+                        className={`cursor-pointer px-4 py-3 text-sm transition hover:bg-red-50 hover:text-red-800 ${
+                          clubFilter === club ? "bg-red-50 font-semibold text-red-800" : "text-gray-700"
+                        }`}
+                      >
+                        {club}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {showClubFilterOptions && clubFilterSearch.length > 0 && clubFilterOptions.length === 0 && (
+                  <div className="absolute z-10 mt-1 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-400 shadow-lg sm:w-72">
+                    Tiada kelab dijumpai.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           {loading ? (
@@ -303,9 +433,24 @@ export default function UserManagementPage() {
               <table className="min-w-full">
                 <thead>
                   <tr className="bg-red-900 text-left">
-                    <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">E-mel</th>
-                    <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Peranan</th>
-                    <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Kelab</th>
+                    {[
+                      { key: "email", label: "E-mel" },
+                      { key: "role",  label: "Peranan" },
+                      { key: "club",  label: "Kelab" },
+                    ].map(({ key, label }) => (
+                      <th key={key} className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">
+                        <button
+                          type="button"
+                          onClick={() => handleSort(key)}
+                          className="flex items-center gap-1 uppercase tracking-wider hover:text-white"
+                        >
+                          {label}
+                          <span className="text-red-300">
+                            {sortBy === key ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
+                          </span>
+                        </button>
+                      </th>
+                    ))}
                     <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Tindakan</th>
                   </tr>
                 </thead>

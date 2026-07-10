@@ -15,6 +15,7 @@ export async function getApprovedTransactionsForReport({
   startDate,
   endDate,
   programmeCode,
+  programmeCodes,
 }) {
   let q;
   if (role === "treasurer") {
@@ -38,6 +39,8 @@ export async function getApprovedTransactionsForReport({
 
   if (programmeCode) {
     records = records.filter((item) => item.programmeCode === programmeCode);
+  } else if (programmeCodes?.length) {
+    records = records.filter((item) => programmeCodes.includes(item.programmeCode));
   }
 
   if (startDate) {

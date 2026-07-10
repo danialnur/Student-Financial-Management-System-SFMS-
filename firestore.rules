@@ -124,6 +124,7 @@ service cloud.firestore {
                     );
       allow create: if isTreasurer() && request.auth.uid == request.resource.data.createdBy;
       allow update: if isReviewerOfCategory(resource.data.createdByClub, resource.data.createdByCategory);
+      allow delete: if isAdmin();
     }
 
     match /pdfSubmissions/{docId} {
@@ -133,6 +134,7 @@ service cloud.firestore {
                     );
       allow create: if isTreasurer() && request.auth.uid == request.resource.data.createdBy;
       allow update: if isReviewerOfCategory(resource.data.createdByClub, resource.data.createdByCategory);
+      allow delete: if isAdmin();
     }
   }
 }

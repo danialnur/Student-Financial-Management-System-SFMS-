@@ -39,12 +39,18 @@ export async function getAdminDashboardSummary() {
     ...pdfs.map(p  => ({ ...p, kind: "pdf" })),
   ].sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
 
+  const totalIncome  = transactions.filter(t => t.type === "income").reduce((s, t) => s + Number(t.amount || 0), 0);
+  const totalExpense = transactions.filter(t => t.type === "expense").reduce((s, t) => s + Number(t.amount || 0), 0);
+
   return {
     totalUsers:        users.length,
     totalTransactions:  transactions.length,
     pendingCount:  submissions.filter(s => PENDING_STATUSES.includes(s.status)).length,
     approvedCount: submissions.filter(s => APPROVED_STATUSES.includes(s.status)).length,
     rejectedCount: submissions.filter(s => s.status === "ditolak").length,
+    totalIncome,
+    totalExpense,
+    balance: totalIncome - totalExpense,
     users,
     transactions,
     submissions,
@@ -62,15 +68,13 @@ export async function getBendahariKelabSummary(club) {
     return { programmes: [], totalIncome: 0, totalExpense: 0, balance: 0 };
   }
 
-  const codes = programmes.map((p) => p.code);
-
-  // Firestore "in" supports up to 30 values — chunk if needed
-  const allTxns = [];
-  for (let i = 0; i < codes.length; i += 30) {
-    const chunk = codes.slice(i, i + 30);
-    const snap = await getDocs(query(transactionsRef, where("programmeCode", "in", chunk)));
-    allTxns.push(...snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-  }
+  // Query by createdByClub, not programmeCode — that's the field the
+  // Firestore security rule for `transactions` actually authorizes
+  // bendahari_kelab reads against. Filtering on programmeCode instead makes
+  // Firestore deny the whole list request with permission-denied, since the
+  // query filter wouldn't line up with what the rule checks.
+  const txSnap = await getDocs(query(transactionsRef, where("createdByClub", "==", club)));
+  const allTxns = txSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
   const progSummaries = programmes.map((prog) => {
     const txns    = allTxns.filter((t) => t.programmeCode === prog.code);

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { CLUB_CATEGORIES } from "../config/clubsConfig";
 import { getProgrammesByClub } from "../services/programmeService";
 import { getApprovedTransactionsForReport } from "../services/reportService";
 import PageHeader from "../components/PageHeader";
@@ -10,12 +9,16 @@ const fmtRM = (v) => `RM ${Number(v || 0).toFixed(2)}`;
 
 export default function PegawaiReportPage() {
   const navigate = useNavigate();
-  const { currentUser, userProfile } = useAuth();
+  const { currentUser, userProfile, selectedClub } = useAuth();
 
   const category  = userProfile?.category || "";
-  const clubList  = category ? (CLUB_CATEGORIES[category] ?? []) : [];
 
-  const [selectedClub, setSelectedClub]   = useState("");
+  useEffect(() => {
+    if (category && !selectedClub) {
+      navigate("/pegawai/pilih-kelab", { replace: true });
+    }
+  }, [category, selectedClub, navigate]);
+
   const [programmes, setProgrammes]       = useState([]);
   const [loadingProg, setLoadingProg]     = useState(false);
   const [selectedCode, setSelectedCode]   = useState("");
@@ -59,6 +62,11 @@ export default function PegawaiReportPage() {
     }
   };
 
+  useEffect(() => {
+    if (selectedClub) handleLoadReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClub]);
+
   const totalIncome  = records.filter(r => r.type === "income").reduce((s, r) => s + Number(r.amount || 0), 0);
   const totalExpense = records.filter(r => r.type === "expense").reduce((s, r) => s + Number(r.amount || 0), 0);
   const balance      = totalIncome - totalExpense;
@@ -69,7 +77,7 @@ export default function PegawaiReportPage() {
     <div className="min-h-screen bg-gray-50">
       <PageHeader
         title="Penyata Kewangan Kelab"
-        subtitle={category ? `Kategori: ${category}` : ""}
+        subtitle={selectedClub ? `Kelab: ${selectedClub}` : (category ? `Kategori: ${category}` : "")}
         action={
           <button
             onClick={() => navigate(-1)}
@@ -90,20 +98,16 @@ export default function PegawaiReportPage() {
           <>
             {/* Filters */}
             <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-              <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-red-700">Pilih Kelab &amp; Program</h2>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-gray-600">Kelab ({category})</label>
-                  <select
-                    value={selectedClub}
-                    onChange={e => setSelectedClub(e.target.value)}
-                    className={inputClass}
-                  >
-                    <option value="">-- Pilih Kelab --</option>
-                    {clubList.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-red-700">Program &amp; Tarikh</h2>
+                <Link to="/pegawai/pilih-kelab" className="text-xs font-medium text-red-800 hover:underline">
+                  Tukar Kelab
+                </Link>
+              </div>
+              <div className="mb-4 rounded-xl border border-gray-100 bg-gray-50 px-4 py-2.5 text-sm text-gray-700">
+                <span className="font-semibold">Kelab Diselia: </span>{selectedClub}
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-gray-600">Program</label>
                   <select

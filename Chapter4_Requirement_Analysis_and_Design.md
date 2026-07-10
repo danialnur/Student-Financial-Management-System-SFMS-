@@ -747,6 +747,9 @@ Table 4.2 summarises the five Firestore collections, their key fields, and field
 | | club | String | Single assigned club (treasurer, bendahari\_kelab) |
 | | clubs | String[ ] | Array of assigned clubs (advisor) |
 | | category | String | BAPP category (pegawai only) |
+| | icNumber | String (encrypted) | IC number — AES-256-GCM ciphertext, see §4.5.3 |
+| | phone | String (encrypted) | Phone number — AES-256-GCM ciphertext, see §4.5.3 |
+| | matricNumber | String (encrypted) | Matric number — AES-256-GCM ciphertext, see §4.5.3 |
 | | signatures | String[ ] | Base64 data URLs of saved digital signatures |
 | **transactions** | id | String (PK) | Auto-generated Firestore document ID |
 | | createdBy | String (FK) | UID of creating Treasurer |
@@ -780,6 +783,26 @@ Firebase Storage organised binary files under three path prefixes:
 - `receipts/{uid}/{timestamp}-{filename}` — uploaded receipt images and PDFs
 - `pdf_submissions/{formType}/{uid}/{timestamp}.pdf` — submitted financial forms
 - `signatures/{uid}/slot-{slot}.png` — user digital signature images
+
+### 4.5.3 Field-Level Encryption of Crucial Data
+
+In addition to the transport-level protection provided by TLS and the encryption-at-rest that Google Cloud applies to all Firestore data by default, the SFMS applied an explicit application-level encryption layer over the three most sensitive personally identifiable fields on a user profile: **IC number**, **phone number**, and **matric number**. These fields were chosen because they are the direct personal identifiers collected from students and staff, whereas other profile fields (email, username, full name) were left in plaintext since they are required for authentication, search, and everyday display throughout the interface.
+
+**Algorithm.** Each field was encrypted independently using **AES-256-GCM**, an authenticated symmetric cipher that provides both confidentiality and tamper detection. A random 96-bit initialisation vector (IV) was generated per encryption operation, so that encrypting the same value twice never produced the same ciphertext — a property required for semantic security, at the cost of the field no longer being usable in Firestore equality queries (verified not to be needed, as no part of the system queried by IC number, phone, or matric number).
+
+The encrypted value was stored as a single string in the format:
+
+```
+enc:v1:<base64 IV>.<base64 ciphertext‖authentication tag>
+```
+
+The `enc:v1:` prefix allowed the decryption routine to recognise and safely skip any value that was not in encrypted form, which kept the migration of pre-existing plaintext records straightforward and idempotent.
+
+**Implementation.** On the client, encryption and decryption were implemented in `src/utils/fieldEncryption.js` using the browser's native **Web Crypto API** (`crypto.subtle`), requiring no additional cryptography library. `userService.js` called `encryptField()` immediately before every write to `icNumber`, `phone`, or `matricNumber` (at registration and at self-service profile updates), while `AuthContext.jsx` called `decryptField()` once, immediately after a user's profile document was fetched from Firestore — every other part of the application (the profile editor, the auto-fill logic that copies a treasurer's IC number and phone into a submitted UTM form) therefore continued to read plain values transparently through `userProfile`, without needing any awareness that the underlying Firestore document was encrypted.
+
+**Key management and its limitation.** The AES-256 key was generated once and supplied to the frontend build through an environment variable (`VITE_FIELD_ENCRYPTION_KEY`), rather than being committed to source control. This was a deliberate, documented trade-off appropriate to the project's serverless, backend-less architecture: because the SFMS has no server component of its own beyond Firebase's managed services, there was no location to hold a secret that the browser could not, in principle, also read — the key is compiled into the JavaScript bundle served to the browser. This means the scheme protects the crucial fields from casual exposure (e.g. a reviewer or third party browsing the raw Firestore console, a database export, or a backup) but would not withstand a determined attacker capable of inspecting the deployed frontend bundle. Closing that gap would require moving the encryption/decryption operation to a trusted server component — for example, a Firebase Cloud Function that holds the key and is called by the client — which was identified as a direction for future work (§6.5) rather than being implemented, since it required upgrading the Firebase project to a paid billing tier purely to host that function.
+
+**Migration of existing data.** A one-off administrative script (`scripts/encrypt-user-pii.mjs`) was written to bring pre-existing user records in line with the new scheme. Following the same dry-run-then-apply pattern used elsewhere in the project's administrative tooling, the script first reported which records held plaintext values before any write occurred, then encrypted them in place using Node's built-in `crypto` module configured to produce byte-for-byte the same ciphertext format as the browser's Web Crypto implementation. The migration was verified by decrypting a sample of migrated records back to their original plaintext before being treated as complete.
 
 ---
 

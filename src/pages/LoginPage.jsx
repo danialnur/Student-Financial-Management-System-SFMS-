@@ -65,7 +65,7 @@ export default function LoginPage() {
     else if (userRole === "advisor")       navigate("/advisor/dashboard",        { replace: true });
     else if (userRole === "admin")         navigate("/admin/dashboard",          { replace: true });
     else if (userRole === "bendahari_kelab") navigate("/bendahari-kelab/dashboard", { replace: true });
-    else if (userRole === "pegawai")       navigate("/pegawai/dashboard",        { replace: true });
+    else if (userRole === "pegawai")       navigate("/pegawai/pilih-kelab",      { replace: true });
   }, [currentUser, userRole, authLoading, navigate]);
 
   const validate = () => {

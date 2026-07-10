@@ -15,6 +15,7 @@ service firebase.storage {
       return isSignedIn() && myRole() in ['admin', 'bendahari_kelab', 'advisor', 'pegawai'];
     }
     function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isAdmin() { return isSignedIn() && myRole() == 'admin'; }
 
     // Personal transaction receipts — self only, never reviewed by anyone else.
     match /receipts/{userId}/{fileName} {
@@ -44,6 +45,9 @@ service firebase.storage {
     match /pdf_submissions/{formType}/{userId}/{fileName} {
       allow read: if isOwner(userId) || isReviewer();
       allow write: if isOwner(userId);
+      // Admin can delete a submission's PDF entirely (e.g. removing a
+      // rejected/erroneous submission) without being the original uploader.
+      allow delete: if isAdmin();
     }
   }
 }

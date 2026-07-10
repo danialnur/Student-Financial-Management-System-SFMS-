@@ -50,6 +50,8 @@ The following limitations arose from architectural constraints of the chosen tec
 
 **No Push Notifications.** The system had no mechanism to proactively notify a Treasurer when their transaction was approved or rejected, nor to notify a reviewer when new transactions were pending. Users had to check their dashboard or the approval page manually to see status updates. Real-time Firestore listeners updated the UI on-screen, but browser-level push notifications required Firebase Cloud Messaging, which was not implemented.
 
+**Client-side Encryption Key Exposure.** Crucial personal fields (IC number, phone number, matriculation number) were encrypted at the application level with AES-256-GCM before being written to Firestore (§4.5.3, §5.2.3.5). Because the SFMS had no backend server, the encryption key was necessarily embedded in the deployed frontend bundle rather than held server-side. This protected the fields from casual exposure through the Firestore console or a raw data export, but not from an attacker capable of extracting the key from the client-side JavaScript bundle — a limitation inherent to encrypting data entirely within a serverless, backend-less architecture.
+
 ---
 
 ## 6.5 Recommendations for Future Work
@@ -67,6 +69,8 @@ The following enhancements are recommended as extensions to the SFMS in future d
 **Export to Excel and CSV.** In addition to PDF report generation, providing Excel (XLSX) and CSV export options using a library such as SheetJS would give users more flexibility in how they store and re-use financial data, particularly for integration with UTM's institutional reporting tools.
 
 **Budget Planning Module.** A budget planning feature allowing treasurers to set a programme budget and track expenditure as a percentage of that budget would close a gap in the current system, where transactions are recorded without reference to any pre-approved budget ceiling.
+
+**Server-held Encryption Key via Cloud Functions.** Moving the encryption and decryption of crucial personal fields (§4.5.3) behind a Firebase Cloud Function would keep the AES-256 key entirely server-side, closing the client-side exposure limitation identified in Section 6.4. This was not implemented in the current iteration as it required upgrading the Firebase project from the free Spark plan to the pay-as-you-go Blaze plan.
 
 ---
 

@@ -16,6 +16,9 @@ import PageHeader from "../components/PageHeader";
 const inputClass = "w-full rounded-xl border border-gray-200 px-4 py-3 text-sm outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100";
 const inputErr   = "w-full rounded-xl border border-red-400 bg-red-50 px-4 py-3 text-sm outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100";
 
+// Kod program must never contain spaces or dashes — stripped as the treasurer types.
+const stripCodeFormat = (v) => v.replace(/[\s-]+/g, "");
+
 const fmtDate = (ts) =>
   ts?.toDate ? ts.toDate().toLocaleDateString("ms-MY", { day: "2-digit", month: "short", year: "numeric" }) : null;
 
@@ -202,6 +205,12 @@ export default function BendahariKelabProgrammesPage() {
       const original = programmes.find(p => p.id === editingId);
       const codeChanged = original && editForm.code.trim().toUpperCase() !== (original.code ?? "").trim().toUpperCase();
       const nameChanged = original && editForm.name.trim().toLowerCase() !== (original.name ?? "").trim().toLowerCase();
+
+      if (original && !codeChanged && !nameChanged) {
+        closeEditModal();
+        return;
+      }
+
       const dupErrors = {};
       if (codeChanged) {
         const taken = await isProgrammeCodeTaken(editForm.code);
@@ -444,7 +453,7 @@ export default function BendahariKelabProgrammesPage() {
                     type="text"
                     placeholder="cth. P001"
                     value={form.code}
-                    onChange={e => { setForm(p => ({ ...p, code: e.target.value })); setFormError(p => ({ ...p, code: "" })); }}
+                    onChange={e => { setForm(p => ({ ...p, code: stripCodeFormat(e.target.value) })); setFormError(p => ({ ...p, code: "" })); }}
                     className={formError.code ? inputErr : inputClass}
                   />
                   {formError.code && <p className="mt-1 text-xs text-red-600">{formError.code}</p>}
@@ -616,7 +625,7 @@ export default function BendahariKelabProgrammesPage() {
                 <input
                   type="text"
                   value={editForm.code}
-                  onChange={e => { setEditForm(p => ({ ...p, code: e.target.value })); setEditFormError(p => ({ ...p, code: "" })); }}
+                  onChange={e => { setEditForm(p => ({ ...p, code: stripCodeFormat(e.target.value) })); setEditFormError(p => ({ ...p, code: "" })); }}
                   className={editFormError.code ? inputErr : inputClass}
                 />
                 {editFormError.code && <p className="mt-1 text-xs text-red-600">{editFormError.code}</p>}

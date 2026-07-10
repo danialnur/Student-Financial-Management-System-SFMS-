@@ -1,6 +1,6 @@
 import { storage, db } from "../firebase/config";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { addDoc, collection, getDocs, query, where, updateDoc, doc, serverTimestamp } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+import { addDoc, collection, deleteDoc, getDocs, query, where, updateDoc, doc, serverTimestamp } from "firebase/firestore";
 import { CLUB_CATEGORIES } from "../config/clubsConfig";
 
 const categoryForClub = (club) => {
@@ -108,4 +108,14 @@ export async function updatePdfSubmissionStatus(id, status, reviewer, additional
     reviewedAt:      serverTimestamp(),
     ...additionalData,
   });
+}
+
+// Admin-only — permanently removes a PDF submission and its Storage file (see
+// firestore.rules / storage.rules). The Storage delete is best-effort: if the
+// file is already gone we still want the Firestore doc removed.
+export async function deletePdfSubmission(id, pdfPath) {
+  if (pdfPath) {
+    try { await deleteObject(ref(storage, pdfPath)); } catch { /* file may already be gone */ }
+  }
+  await deleteDoc(doc(db, "pdfSubmissions", id));
 }

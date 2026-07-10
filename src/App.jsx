@@ -7,6 +7,7 @@ import AdvisorDashboard from "./pages/AdvisorDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import BendahariKelabDashboard from "./pages/BendahariKelabDashboard";
 import PegawaiDashboard from "./pages/PegawaiDashboard";
+import PegawaiSelectClubPage from "./pages/PegawaiSelectClubPage";
 import AddTransactionPage from "./pages/AddTransactionPage";
 import EditTransactionPage from "./pages/EditTransactionPage";
 import TransactionHistoryPage from "./pages/TransactionHistoryPage";
@@ -64,6 +65,7 @@ export default function App() {
       <Route path="/bendahari-kelab/access-requests"     element={<ProtectedRoute allowedRoles={["bendahari_kelab"]}><BendahariKelabAccessPage /></ProtectedRoute>} />
 
       {/* ── Pegawai ── */}
+      <Route path="/pegawai/pilih-kelab"        element={<ProtectedRoute allowedRoles={["pegawai"]}><PegawaiSelectClubPage /></ProtectedRoute>} />
       <Route path="/pegawai/dashboard"          element={<ProtectedRoute allowedRoles={["pegawai"]}><PegawaiDashboard /></ProtectedRoute>} />
       <Route path="/pegawai/approvals"          element={<ProtectedRoute allowedRoles={["pegawai"]}><ApprovalPage /></ProtectedRoute>} />
       <Route path="/pegawai/penyata-kewangan"   element={<ProtectedRoute allowedRoles={["pegawai"]}><PegawaiReportPage /></ProtectedRoute>} />
