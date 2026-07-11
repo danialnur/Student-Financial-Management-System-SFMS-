@@ -38,29 +38,52 @@ service cloud.firestore {
     // ── users ──────────────────────────────────────────────────────────────
     // Full profile documents (name, IC, phone, matric, role, club/clubs/category,
     // signatures). Self, admin, or a reviewer role looking up a treasurer only.
+    // A pending bendahari_kelab self-registration, visible only to the
+    // advisor(s) of that same club so they can approve/reject it.
+    function isPendingBendahariKelabForMyClub(data) {
+      return isAdvisor() && data.role == 'bendahari_kelab' &&
+             data.accountStatus == 'pending_advisor' && data.club in myClubs();
+    }
+
     match /users/{userId} {
       allow get: if isSignedIn() && (
                     request.auth.uid == userId ||
                     isAdmin() ||
-                    ((isBendahariKelab() || isAdvisor() || isPegawai()) && resource.data.role == 'treasurer')
+                    ((isBendahariKelab() || isAdvisor() || isPegawai()) && resource.data.role == 'treasurer') ||
+                    isPendingBendahariKelabForMyClub(resource.data)
                   );
       allow list: if isSignedIn() && (
                     isAdmin() ||
-                    ((isBendahariKelab() || isAdvisor() || isPegawai()) && resource.data.role == 'treasurer')
+                    ((isBendahariKelab() || isAdvisor() || isPegawai()) && resource.data.role == 'treasurer') ||
+                    isPendingBendahariKelabForMyClub(resource.data)
                   );
+      // Self-registration: treasurer is active immediately; bendahari_kelab
+      // needs its club's advisor to approve; advisor/pegawai need admin
+      // approval — the accountStatus written must match the role so a client
+      // can't self-approve by simply writing "active".
       allow create: if isSignedIn() && (
                       isAdmin() ||
-                      (request.auth.uid == userId && request.resource.data.role == 'treasurer')
+                      (request.auth.uid == userId &&
+                       ((request.resource.data.role == 'treasurer'       && request.resource.data.accountStatus == 'active') ||
+                        (request.resource.data.role == 'bendahari_kelab' && request.resource.data.accountStatus == 'pending_advisor') ||
+                        (request.resource.data.role == 'advisor'        && request.resource.data.accountStatus == 'pending_admin') ||
+                        (request.resource.data.role == 'pegawai'        && request.resource.data.accountStatus == 'pending_admin')))
                     );
       allow update: if isSignedIn() && (
                       isAdmin() ||
                       (request.auth.uid == userId &&
-                       request.resource.data.role     == resource.data.role &&
-                       request.resource.data.club     == resource.data.club &&
-                       request.resource.data.clubs    == resource.data.clubs &&
-                       request.resource.data.category == resource.data.category &&
-                       request.resource.data.email    == resource.data.email &&
-                       request.resource.data.username == resource.data.username)
+                       request.resource.data.role          == resource.data.role &&
+                       request.resource.data.club          == resource.data.club &&
+                       request.resource.data.clubs         == resource.data.clubs &&
+                       request.resource.data.category      == resource.data.category &&
+                       request.resource.data.email         == resource.data.email &&
+                       request.resource.data.username      == resource.data.username &&
+                       request.resource.data.accountStatus == resource.data.accountStatus) ||
+                      // Advisor approving/rejecting a pending bendahari_kelab for their
+                      // own club may only ever touch the review-outcome fields.
+                      (isPendingBendahariKelabForMyClub(resource.data) &&
+                       request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['accountStatus', 'reviewedBy', 'reviewedByEmail', 'reviewedAt', 'updatedAt']))
                     );
       allow delete: if isAdmin();
     }

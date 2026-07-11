@@ -1,8 +1,11 @@
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
-export default function ProtectedRoute({ children, allowedRoles }) {
-  const { currentUser, userRole, loading } = useAuth();
+// requireActive: set to false only for the pending-approval holding page
+// itself, so a not-yet-approved user can actually reach it instead of being
+// redirected back to it forever.
+export default function ProtectedRoute({ children, allowedRoles, requireActive = true }) {
+  const { currentUser, userRole, userProfile, loading } = useAuth();
 
   if (loading) {
     return (
@@ -25,6 +28,12 @@ export default function ProtectedRoute({ children, allowedRoles }) {
 
   if (!allowedRoles.includes(userRole)) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Self-registered bendahari_kelab/advisor/pegawai accounts can't act until
+  // approved (see firestore.rules) — bounce them to the holding page.
+  if (requireActive && userProfile?.accountStatus && userProfile.accountStatus !== "active") {
+    return <Navigate to="/menunggu-kelulusan" replace />;
   }
 
   return children;

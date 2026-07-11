@@ -29,15 +29,17 @@ export function AuthProvider({ children }) {
       const snap = await getDoc(doc(db, "users", user.uid));
       if (snap.exists()) {
         const data = snap.data();
-        // icNumber/phone/matricNumber are stored encrypted (see fieldEncryption.js) —
-        // decrypt once here so every consumer of userProfile sees plain values.
-        const [icNumber, phone, matricNumber] = await Promise.all([
+        // icNumber/phone/matricNumber/staffNumber are stored encrypted (see
+        // fieldEncryption.js) — decrypt once here so every consumer of
+        // userProfile sees plain values.
+        const [icNumber, phone, matricNumber, staffNumber] = await Promise.all([
           decryptField(data.icNumber),
           decryptField(data.phone),
           decryptField(data.matricNumber),
+          decryptField(data.staffNumber),
         ]);
         setUserRole(data.role || null);
-        setUserProfile({ ...data, icNumber, phone, matricNumber });
+        setUserProfile({ ...data, icNumber, phone, matricNumber, staffNumber });
       } else {
         setUserRole(null); setUserProfile(null);
       }

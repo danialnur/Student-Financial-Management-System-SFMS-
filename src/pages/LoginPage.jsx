@@ -43,7 +43,7 @@ const getErrorMessage = (code) => {
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { currentUser, userRole, loading: authLoading } = useAuth();
+  const { currentUser, userRole, userProfile, loading: authLoading } = useAuth();
 
   const [email, setEmail]             = useState("");
   const [password, setPassword]       = useState("");
@@ -61,19 +61,23 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (authLoading || !currentUser || !userRole) return;
+    if (userProfile?.accountStatus && userProfile.accountStatus !== "active") {
+      navigate("/menunggu-kelulusan", { replace: true });
+      return;
+    }
     if (userRole === "treasurer")          navigate("/treasurer/dashboard",      { replace: true });
     else if (userRole === "advisor")       navigate("/advisor/dashboard",        { replace: true });
     else if (userRole === "admin")         navigate("/admin/dashboard",          { replace: true });
     else if (userRole === "bendahari_kelab") navigate("/bendahari-kelab/dashboard", { replace: true });
     else if (userRole === "pegawai")       navigate("/pegawai/pilih-kelab",      { replace: true });
-  }, [currentUser, userRole, authLoading, navigate]);
+  }, [currentUser, userRole, userProfile, authLoading, navigate]);
 
   const validate = () => {
     const errors = {};
     if (!email.trim())
-      errors.email = "E-mel atau nama pengguna diperlukan.";
-    else if (email.includes("@") && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-      errors.email = "Sila masukkan alamat e-mel yang sah.";
+      errors.email = "Nama pengguna diperlukan.";
+    else if (email.includes("@"))
+      errors.email = "Sila log masuk menggunakan nama pengguna, bukan e-mel.";
     if (!password)
       errors.password = "Kata laluan diperlukan.";
     else if (password.length < 6)
@@ -95,15 +99,11 @@ export default function LoginPage() {
         rememberMe ? browserLocalPersistence : browserSessionPersistence
       );
 
-      let loginEmail = email.trim();
-      if (!loginEmail.includes("@")) {
-        const found = await getEmailByUsername(loginEmail);
-        if (!found) {
-          setErrorMsg("Nama pengguna tidak dijumpai. Sila semak semula.");
-          setLoading(false);
-          return;
-        }
-        loginEmail = found;
+      const loginEmail = await getEmailByUsername(email.trim());
+      if (!loginEmail) {
+        setErrorMsg("Nama pengguna tidak dijumpai. Sila semak semula.");
+        setLoading(false);
+        return;
       }
 
       await signInWithEmailAndPassword(auth, loginEmail, password);
@@ -204,12 +204,12 @@ export default function LoginPage() {
                 <form onSubmit={handleLogin} className="mt-8 space-y-5" noValidate>
                   <div>
                     <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-gray-700">
-                      E-mel atau Nama Pengguna
+                      Nama Pengguna
                     </label>
                     <input
                       id="email"
                       type="text"
-                      placeholder="anda@example.com atau namapengguna"
+                      placeholder="namapengguna"
                       value={email}
                       onChange={(e) => { setEmail(e.target.value); setFieldErrors((p) => ({ ...p, email: "" })); }}
                       className={fieldErrors.email ? inputInvalid : inputNormal}

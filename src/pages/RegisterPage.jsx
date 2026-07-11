@@ -3,11 +3,41 @@ import { createUserWithEmailAndPassword } from "firebase/auth";
 import { useNavigate, Link } from "react-router-dom";
 import { auth } from "../firebase/config";
 import { createUserProfile } from "../services/userService";
+import { CLUB_CATEGORIES, ALL_CLUBS } from "../config/clubsConfig";
 
 const BAPP_LOGO =
   "https://studentaffairs.utm.my/bapp/wp-content/uploads/sites/11/2024/09/Projek-Logo-BAPP-02.png";
 
 const ADMIN_CONTACT = "mailto:sfms-admin@utm.my";
+
+const ROLE_OPTIONS = [
+  { value: "treasurer",       label: "Bendahari" },
+  { value: "bendahari_kelab", label: "Bendahari Kelab" },
+  { value: "advisor",         label: "Penasihat Kelab" },
+  { value: "pegawai",         label: "Pegawai Kewangan" },
+];
+
+// Accounts other than treasurer carry approval authority over club/category
+// finances, so they start pending — see the matching Firestore rule.
+const ACCOUNT_STATUS_BY_ROLE = {
+  treasurer:       "active",
+  bendahari_kelab: "pending_advisor",
+  advisor:         "pending_admin",
+  pegawai:         "pending_admin",
+};
+
+const EMAIL_DOMAIN_BY_ROLE = {
+  treasurer:       { regex: /^[^\s@]+@graduate\.utm\.my$/i, hint: "Mesti berakhir dengan @graduate.utm.my", error: "Hanya e-mel graduan UTM diterima (cth: nama@graduate.utm.my)." },
+  bendahari_kelab: { regex: /^[^\s@]+@utm\.my$/i,           hint: "Mesti berakhir dengan @utm.my",          error: "Hanya e-mel rasmi UTM diterima (cth: nama@utm.my)." },
+  advisor:         { regex: /^[^\s@]+@utm\.my$/i,           hint: "Mesti berakhir dengan @utm.my",          error: "Hanya e-mel rasmi UTM diterima (cth: nama@utm.my)." },
+  pegawai:         { regex: /^[^\s@]+@utm\.my$/i,           hint: "Mesti berakhir dengan @utm.my",          error: "Hanya e-mel rasmi UTM diterima (cth: nama@utm.my)." },
+};
+
+const PENDING_NOTICE_BY_ROLE = {
+  bendahari_kelab: "Akaun anda akan disemak oleh Penasihat Kelab bagi kelab yang dipilih sebelum boleh digunakan.",
+  advisor:         "Akaun anda akan disemak oleh Pentadbir Sistem sebelum boleh digunakan.",
+  pegawai:         "Akaun anda akan disemak oleh Pentadbir Sistem sebelum boleh digunakan.",
+};
 
 const EyeIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
@@ -32,6 +62,13 @@ const PASSWORD_RULES = [
 
 const isPasswordStrong = (p) => PASSWORD_RULES.every((r) => r.test(p));
 
+const formatIcNumber = (raw) => {
+  const digits = raw.replace(/\D/g, "").slice(0, 12);
+  if (digits.length <= 6) return digits;
+  if (digits.length <= 8) return `${digits.slice(0, 6)}-${digits.slice(6)}`;
+  return `${digits.slice(0, 6)}-${digits.slice(6, 8)}-${digits.slice(8)}`;
+};
+
 const getErrorMessage = (code) => {
   switch (code) {
     case "auth/email-already-in-use":   return "Akaun dengan e-mel ini sudah wujud.";
@@ -47,7 +84,12 @@ export default function RegisterPage() {
 
   const [form, setForm] = useState({
     fullName:        "",
+    icNumber:        "",
     matricNumber:    "",
+    staffNumber:     "",
+    role:            "treasurer",
+    club:            "",
+    category:        "",
     email:           "",
     password:        "",
     confirmPassword: "",
@@ -67,6 +109,12 @@ export default function RegisterPage() {
     setFieldErrors((prev) => ({ ...prev, [name]: "" }));
   };
 
+  const handleRoleChange = (e) => {
+    setForm((prev) => ({ ...prev, role: e.target.value, club: "", category: "" }));
+    setFieldErrors({});
+    setErrorMsg("");
+  };
+
   const validate = () => {
     const errors = {};
 
@@ -75,13 +123,31 @@ export default function RegisterPage() {
     else if (form.fullName.trim().length < 3)
       errors.fullName = "Sila masukkan nama penuh anda.";
 
-    if (!form.matricNumber.trim())
+    if (!form.icNumber.trim())
+      errors.icNumber = "No. kad pengenalan diperlukan.";
+    else if (form.icNumber.replace(/\D/g, "").length !== 12)
+      errors.icNumber = "No. kad pengenalan mestilah 12 digit.";
+
+    if (form.role === "treasurer" && !form.matricNumber.trim())
       errors.matricNumber = "No. matrik diperlukan.";
 
+    if ((form.role === "advisor" || form.role === "pegawai") && !form.staffNumber.trim())
+      errors.staffNumber = "No. staf diperlukan.";
+
+    if (form.role === "bendahari_kelab" && !form.club)
+      errors.club = "Sila pilih kelab.";
+
+    if (form.role === "advisor" && !form.club)
+      errors.club = "Sila pilih kelab.";
+
+    if (form.role === "pegawai" && !form.category)
+      errors.category = "Sila pilih kategori kelab.";
+
+    const domain = EMAIL_DOMAIN_BY_ROLE[form.role];
     if (!form.email)
       errors.email = "E-mel diperlukan.";
-    else if (!/^[^\s@]+@graduate\.utm\.my$/i.test(form.email))
-      errors.email = "Hanya e-mel graduan UTM diterima (cth: nama@graduate.utm.my).";
+    else if (!domain.regex.test(form.email))
+      errors.email = domain.error;
 
     if (!form.password)
       errors.password = "Kata laluan diperlukan.";
@@ -107,12 +173,18 @@ export default function RegisterPage() {
       setLoading(true);
       const userCredential = await createUserWithEmailAndPassword(auth, form.email, form.password);
       await createUserProfile(userCredential.user.uid, {
-        email:        form.email,
-        role:         "treasurer",
-        fullName:     form.fullName.trim().toUpperCase(),
-        matricNumber: form.matricNumber.trim().toUpperCase(),
+        email:         form.email,
+        role:          form.role,
+        fullName:      form.fullName.trim().toUpperCase(),
+        icNumber:      form.icNumber.trim(),
+        matricNumber:  form.role === "treasurer" ? form.matricNumber.trim().toUpperCase() : "",
+        staffNumber:   (form.role === "advisor" || form.role === "pegawai") ? form.staffNumber.trim().toUpperCase() : "",
+        club:          form.role === "bendahari_kelab" || form.role === "advisor" ? form.club : "",
+        clubs:         form.role === "advisor" ? [form.club] : [],
+        category:      form.role === "pegawai" ? form.category : "",
+        accountStatus: ACCOUNT_STATUS_BY_ROLE[form.role],
       });
-      navigate("/treasurer/dashboard");
+      navigate(form.role === "treasurer" ? "/treasurer/dashboard" : "/menunggu-kelulusan");
     } catch (error) {
       setErrorMsg(getErrorMessage(error.code));
       console.error(error);
@@ -126,6 +198,7 @@ export default function RegisterPage() {
   const inputInvalid = `${inputBase} border-red-400 focus:border-red-500 focus:ring-red-100 bg-red-50`;
 
   const field = (name) => (fieldErrors[name] ? inputInvalid : inputNormal);
+  const emailDomain = EMAIL_DOMAIN_BY_ROLE[form.role];
 
   return (
     <div className="flex min-h-screen">
@@ -143,7 +216,7 @@ export default function RegisterPage() {
           <h2 className="text-2xl font-bold text-red-300">Kewangan Bijak</h2>
           <p className="mt-1 text-xs font-semibold uppercase tracking-widest text-red-400">BAPP UTM</p>
           <p className="mx-auto mt-4 max-w-xs text-sm leading-relaxed text-red-200">
-            Daftar dengan e-mel graduan UTM anda untuk mula menguruskan kewangan kelab anda.
+            Daftar dengan e-mel UTM anda untuk mula menguruskan kewangan kelab anda.
           </p>
           <div className="mx-auto mt-4 h-px w-16 bg-red-600" />
         </div>
@@ -178,10 +251,20 @@ export default function RegisterPage() {
           <div className="w-full max-w-md">
             <h2 className="text-3xl font-bold text-gray-900">Cipta Akaun</h2>
             <p className="mt-1 text-sm text-gray-500">
-              Daftar sebagai Bendahari · Sistem Pengurusan Kewangan Bijak
+              Sistem Pengurusan Kewangan Bijak
             </p>
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
+
+              {/* Peranan */}
+              <div>
+                <label htmlFor="role" className="mb-1.5 block text-sm font-medium text-gray-700">
+                  Daftar Sebagai
+                </label>
+                <select id="role" name="role" value={form.role} onChange={handleRoleChange} className={inputNormal}>
+                  {ROLE_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
 
               {/* Nama penuh */}
               <div>
@@ -203,36 +286,125 @@ export default function RegisterPage() {
                 )}
               </div>
 
-              {/* No. matrik */}
+              {/* No. kad pengenalan */}
               <div>
-                <label htmlFor="matricNumber" className="mb-1.5 block text-sm font-medium text-gray-700">
-                  No. Matrik
+                <label htmlFor="icNumber" className="mb-1.5 block text-sm font-medium text-gray-700">
+                  No. Kad Pengenalan
                 </label>
                 <input
-                  id="matricNumber"
-                  name="matricNumber"
+                  id="icNumber"
+                  name="icNumber"
                   type="text"
-                  placeholder="cth. A20EC0001"
-                  value={form.matricNumber}
-                  onChange={handleChange}
-                  className={field("matricNumber")}
+                  placeholder="XXXXXX-XX-XXXX"
+                  maxLength={14}
+                  value={form.icNumber}
+                  onChange={(e) => { setForm((p) => ({ ...p, icNumber: formatIcNumber(e.target.value) })); setFieldErrors((p) => ({ ...p, icNumber: "" })); }}
+                  className={field("icNumber")}
                   autoComplete="off"
                 />
-                {fieldErrors.matricNumber && (
-                  <p className="mt-1 text-xs text-red-600">{fieldErrors.matricNumber}</p>
+                {fieldErrors.icNumber && (
+                  <p className="mt-1 text-xs text-red-600">{fieldErrors.icNumber}</p>
                 )}
               </div>
+
+              {/* No. matrik — treasurer only */}
+              {form.role === "treasurer" && (
+                <div>
+                  <label htmlFor="matricNumber" className="mb-1.5 block text-sm font-medium text-gray-700">
+                    No. Matrik
+                  </label>
+                  <input
+                    id="matricNumber"
+                    name="matricNumber"
+                    type="text"
+                    placeholder="cth. A20EC0001"
+                    value={form.matricNumber}
+                    onChange={handleChange}
+                    className={field("matricNumber")}
+                    autoComplete="off"
+                  />
+                  {fieldErrors.matricNumber && (
+                    <p className="mt-1 text-xs text-red-600">{fieldErrors.matricNumber}</p>
+                  )}
+                </div>
+              )}
+
+              {/* No. staf — advisor / pegawai */}
+              {(form.role === "advisor" || form.role === "pegawai") && (
+                <div>
+                  <label htmlFor="staffNumber" className="mb-1.5 block text-sm font-medium text-gray-700">
+                    No. Staf
+                  </label>
+                  <input
+                    id="staffNumber"
+                    name="staffNumber"
+                    type="text"
+                    placeholder="cth. SU12345"
+                    value={form.staffNumber}
+                    onChange={handleChange}
+                    className={field("staffNumber")}
+                    autoComplete="off"
+                  />
+                  {fieldErrors.staffNumber && (
+                    <p className="mt-1 text-xs text-red-600">{fieldErrors.staffNumber}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Kelab — bendahari_kelab / advisor */}
+              {(form.role === "bendahari_kelab" || form.role === "advisor") && (
+                <div>
+                  <label htmlFor="club" className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Kelab
+                  </label>
+                  <select
+                    id="club"
+                    name="club"
+                    value={form.club}
+                    onChange={handleChange}
+                    className={field("club")}
+                  >
+                    <option value="">-- Pilih Kelab --</option>
+                    {ALL_CLUBS.map((club) => <option key={club} value={club}>{club}</option>)}
+                  </select>
+                  {fieldErrors.club && (
+                    <p className="mt-1 text-xs text-red-600">{fieldErrors.club}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Kategori — pegawai */}
+              {form.role === "pegawai" && (
+                <div>
+                  <label htmlFor="category" className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Kategori Kelab
+                  </label>
+                  <select
+                    id="category"
+                    name="category"
+                    value={form.category}
+                    onChange={handleChange}
+                    className={field("category")}
+                  >
+                    <option value="">-- Pilih Kategori --</option>
+                    {Object.keys(CLUB_CATEGORIES).map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+                  </select>
+                  {fieldErrors.category && (
+                    <p className="mt-1 text-xs text-red-600">{fieldErrors.category}</p>
+                  )}
+                </div>
+              )}
 
               {/* E-mel */}
               <div>
                 <label htmlFor="reg-email" className="mb-1.5 block text-sm font-medium text-gray-700">
-                  E-mel Graduan UTM
+                  E-mel UTM
                 </label>
                 <input
                   id="reg-email"
                   name="email"
                   type="email"
-                  placeholder="nama@graduate.utm.my"
+                  placeholder="nama@utm.my"
                   value={form.email}
                   onChange={handleChange}
                   className={field("email")}
@@ -241,7 +413,7 @@ export default function RegisterPage() {
                 {fieldErrors.email ? (
                   <p className="mt-1 text-xs text-red-600">{fieldErrors.email}</p>
                 ) : (
-                  <p className="mt-1 text-xs text-gray-400">Mesti berakhir dengan @graduate.utm.my</p>
+                  <p className="mt-1 text-xs text-gray-400">{emailDomain.hint}</p>
                 )}
               </div>
 
@@ -323,9 +495,19 @@ export default function RegisterPage() {
               </div>
 
               {/* Notis peranan */}
-              <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-                Akaun anda akan didaftarkan sebagai <strong>Bendahari</strong>. Perlukan peranan lain?{" "}
-                <a href={ADMIN_CONTACT} className="font-semibold underline hover:text-blue-900">
+              {form.role === "treasurer" ? (
+                <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                  Akaun anda akan didaftarkan sebagai <strong>Bendahari</strong> dan boleh terus digunakan selepas pendaftaran.
+                </div>
+              ) : (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                  {PENDING_NOTICE_BY_ROLE[form.role]}
+                </div>
+              )}
+
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500">
+                Bukan salah satu peranan ini?{" "}
+                <a href={ADMIN_CONTACT} className="font-semibold underline hover:text-gray-700">
                   Hubungi Pentadbir
                 </a>
               </div>

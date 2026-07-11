@@ -39,10 +39,14 @@ export async function isEmailTaken(email) {
   return snapshot.docs.some((d) => (d.data().email ?? "").trim().toLowerCase() === normalized);
 }
 
+// accountStatus: "active" for admin-created accounts (default) and
+// self-registered treasurers; "pending_advisor" / "pending_admin" for
+// self-registered bendahari_kelab / advisor / pegawai awaiting approval.
 export async function createUserProfile(uid, data) {
   const username = (data.email || "").split("@")[0].toLowerCase();
-  const [encMatricNumber, encIcNumber, encPhone] = await Promise.all([
+  const [encMatricNumber, encStaffNumber, encIcNumber, encPhone] = await Promise.all([
     encryptField(data.matricNumber ?? ""),
+    encryptField(data.staffNumber  ?? ""),
     encryptField(data.icNumber     ?? ""),
     encryptField(data.phone        ?? ""),
   ]);
@@ -52,14 +56,60 @@ export async function createUserProfile(uid, data) {
     role:         data.role,
     fullName:     data.fullName     ?? "",
     matricNumber: encMatricNumber,
+    staffNumber:  encStaffNumber,
     icNumber:     encIcNumber,
     phone:        encPhone,
     club:         data.role === "bendahari_kelab" ? (data.club ?? "") : "",
     clubs:        data.role === "advisor" ? (data.clubs ?? []).filter(Boolean) : [],
     category:     data.role === "pegawai" ? (data.category ?? "") : "",
+    accountStatus: data.accountStatus ?? "active",
     createdAt:    serverTimestamp(),
   });
   await setDoc(doc(db, "usernames", username), { email: data.email, uid });
+}
+
+// Advisor — pending bendahari_kelab self-registrations for their own club(s)
+export async function getPendingBendahariKelabForClubs(clubs) {
+  if (!clubs?.length) return [];
+  const results = [];
+  for (const club of clubs) {
+    if (!club) continue;
+    const snap = await getDocs(query(usersRef,
+      where("role", "==", "bendahari_kelab"),
+      where("accountStatus", "==", "pending_advisor"),
+      where("club", "==", club)
+    ));
+    results.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  }
+  return results.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+}
+
+// Admin — pending advisor/pegawai self-registrations
+export async function getPendingAdminApprovals() {
+  const snap = await getDocs(query(usersRef, where("accountStatus", "==", "pending_admin")));
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+}
+
+export async function approveAccount(uid, reviewer) {
+  await updateDoc(doc(db, "users", uid), {
+    accountStatus:   "active",
+    reviewedBy:      reviewer.uid,
+    reviewedByEmail: reviewer.email,
+    reviewedAt:      serverTimestamp(),
+    updatedAt:       serverTimestamp(),
+  });
+}
+
+export async function rejectAccount(uid, reviewer) {
+  await updateDoc(doc(db, "users", uid), {
+    accountStatus:   "rejected",
+    reviewedBy:      reviewer.uid,
+    reviewedByEmail: reviewer.email,
+    reviewedAt:      serverTimestamp(),
+    updatedAt:       serverTimestamp(),
+  });
 }
 
 // role-specific:
@@ -67,7 +117,8 @@ export async function createUserProfile(uid, data) {
 //   advisor         → clubs (string[], admin sets 1+)
 //   pegawai         → category (string)
 export async function updateUserRole(uid, role, extraData = {}) {
-  const update = { role, updatedAt: serverTimestamp() };
+  // Admin changing a user's role is itself an approval action.
+  const update = { role, accountStatus: "active", updatedAt: serverTimestamp() };
   if (role === "bendahari_kelab") {
     update.club     = extraData.club ?? "";
     update.clubs    = [];

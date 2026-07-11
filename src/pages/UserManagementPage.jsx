@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createUserWithEmailAndPassword } from "firebase/auth";
+import { useAuth } from "../context/AuthContext";
 import PageHeader from "../components/PageHeader";
 import { secondaryAuth } from "../firebase/adminAuth";
 import { ALL_CLUBS, CLUB_CATEGORIES } from "../config/clubsConfig";
@@ -11,6 +12,9 @@ import {
   removeUserAccess,
   updateUserRole,
   updateAdvisorClubs,
+  getPendingAdminApprovals,
+  approveAccount,
+  rejectAccount,
 } from "../services/userService";
 
 const ROLE_META = {
@@ -46,10 +50,18 @@ const SORT_ACCESSORS = {
 
 export default function UserManagementPage() {
   const navigate = useNavigate();
+  const { currentUser } = useAuth();
 
   const [users, setUsers]         = useState([]);
   const [loading, setLoading]     = useState(true);
   const [errorMsg, setErrorMsg]   = useState("");
+
+  const [pendingApprovals, setPendingApprovals]     = useState([]);
+  const [loadingApprovals, setLoadingApprovals]     = useState(true);
+  const [confirmApproval, setConfirmApproval]       = useState(null); // { id, action: "approve"|"reject", email }
+  const [approvalActionId, setApprovalActionId]     = useState("");
+  const [approvalSuccessMsg, setApprovalSuccessMsg] = useState("");
+  const [approvalError, setApprovalError]           = useState("");
 
   const [search, setSearch]         = useState("");
   const [roleFilter, setRoleFilter] = useState("");
@@ -110,7 +122,31 @@ export default function UserManagementPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { loadUsers(); }, []);
+  const loadPendingApprovals = async () => {
+    try { setLoadingApprovals(true); setPendingApprovals(await getPendingAdminApprovals()); }
+    catch { setApprovalError("Gagal memuatkan akaun menunggu."); }
+    finally { setLoadingApprovals(false); }
+  };
+
+  useEffect(() => { loadUsers(); loadPendingApprovals(); }, []);
+
+  const handleConfirmedApprovalAction = async () => {
+    if (!confirmApproval) return;
+    const { id, action } = confirmApproval;
+    try {
+      setApprovalActionId(id); setConfirmApproval(null); setApprovalError("");
+      if (action === "approve") await approveAccount(id, { uid: currentUser.uid, email: currentUser.email });
+      else await rejectAccount(id, { uid: currentUser.uid, email: currentUser.email });
+      await loadPendingApprovals();
+      await loadUsers();
+      setApprovalSuccessMsg(action === "approve" ? "Akaun berjaya diluluskan." : "Akaun berjaya ditolak.");
+    } catch (e) {
+      console.error(e);
+      setApprovalError("Gagal mengemaskini akaun.");
+    } finally {
+      setApprovalActionId("");
+    }
+  };
 
   const handleChange = (e) => setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
 
@@ -347,6 +383,60 @@ export default function UserManagementPage() {
             </button>
           </form>
           {errorMsg && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{errorMsg}</div>}
+        </div>
+
+        {/* Akaun menunggu kelulusan (Penasihat Kelab / Pegawai Kewangan) */}
+        <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-red-100 px-6 py-4">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-red-700">Akaun Menunggu Kelulusan</h2>
+            <p className="mt-1 text-xs text-gray-400">Pendaftaran sendiri sebagai Penasihat Kelab atau Pegawai Kewangan.</p>
+          </div>
+          {approvalError && <div className="mx-6 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{approvalError}</div>}
+          {loadingApprovals ? (
+            <p className="p-6 text-sm text-gray-500">Memuatkan akaun menunggu...</p>
+          ) : pendingApprovals.length === 0 ? (
+            <p className="p-6 text-sm text-gray-500">Tiada akaun menunggu kelulusan.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full">
+                <thead>
+                  <tr className="bg-red-900 text-left">
+                    {["Nama Penuh", "E-mel", "Peranan", "Kelab / Kategori", "Tindakan"].map(h => (
+                      <th key={h} className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-red-50">
+                  {pendingApprovals.map(item => (
+                    <tr key={item.id} className="hover:bg-red-50 transition-colors">
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{item.fullName || "—"}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">{item.email}</td>
+                      <td className="px-4 py-3"><span className={roleBadge(item.role)}>{roleLabel(item.role)}</span></td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{userClubText(item) || "—"}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setConfirmApproval({ id: item.id, action: "approve", email: item.email })}
+                            disabled={approvalActionId === item.id}
+                            className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-green-700 disabled:opacity-60"
+                          >
+                            Lulus
+                          </button>
+                          <button
+                            onClick={() => setConfirmApproval({ id: item.id, action: "reject", email: item.email })}
+                            disabled={approvalActionId === item.id}
+                            className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:opacity-60"
+                          >
+                            Tolak
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Jadual pengguna */}
@@ -704,6 +794,46 @@ export default function UserManagementPage() {
             <button onClick={() => setCreateSuccess(false)} className="w-full rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800">
               Okay
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm approve/reject pending account */}
+      {confirmApproval && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100">
+              <svg className="h-7 w-7 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+            </div>
+            <h3 className="mb-2 text-base font-bold text-gray-900">
+              {confirmApproval.action === "approve" ? "Luluskan Akaun Ini?" : "Tolak Akaun Ini?"}
+            </h3>
+            <p className="mb-6 text-sm text-gray-600">
+              <span className="font-semibold text-gray-800">{confirmApproval.email}</span>{" "}
+              {confirmApproval.action === "approve" ? "akan diluluskan dan boleh log masuk serta-merta." : "akan ditolak dan tidak dapat log masuk."}
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmApproval(null)} className="flex-1 rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50">Batal</button>
+              <button onClick={handleConfirmedApprovalAction} className="flex-1 rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800">Ya, Teruskan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Approval action success */}
+      {approvalSuccessMsg && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
+              <svg className="h-7 w-7 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h3 className="mb-2 text-base font-bold text-gray-900">Berjaya</h3>
+            <p className="mb-6 text-sm text-gray-500">{approvalSuccessMsg}</p>
+            <button onClick={() => setApprovalSuccessMsg("")} className="w-full rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800">OK</button>
           </div>
         </div>
       )}

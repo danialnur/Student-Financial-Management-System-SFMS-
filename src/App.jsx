@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
+import MenungguKelulusanPage from "./pages/MenungguKelulusanPage";
 import ProgrammeManagementPage from "./pages/ProgrammeManagementPage";
 import TreasurerDashboard from "./pages/TreasurerDashboard";
 import AdvisorDashboard from "./pages/AdvisorDashboard";
@@ -33,6 +34,14 @@ export default function App() {
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route
+        path="/menunggu-kelulusan"
+        element={
+          <ProtectedRoute allowedRoles={["bendahari_kelab", "advisor", "pegawai"]} requireActive={false}>
+            <MenungguKelulusanPage />
+          </ProtectedRoute>
+        }
+      />
 
       {/* ── Treasurer ── */}
       <Route path="/treasurer/dashboard" element={<ProtectedRoute allowedRoles={["treasurer"]}><TreasurerDashboard /></ProtectedRoute>} />
