@@ -61,7 +61,6 @@ export default function EditTransactionPage() {
 
         if (!data)                              { setErrorMsg("Transaksi tidak dijumpai."); return; }
         if (data.createdBy !== currentUser.uid) { setErrorMsg("Anda tidak dibenarkan menyunting transaksi ini."); return; }
-        if (data.status !== "pending")          { setErrorMsg("Hanya transaksi menunggu boleh disunting."); return; }
 
         setTransaction(data);
         setForm({

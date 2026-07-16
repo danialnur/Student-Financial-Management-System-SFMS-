@@ -11,9 +11,10 @@ export const CHECKERBOARD_BG = "bg-[repeating-conic-gradient(#e5e7eb_0%_25%,#f9f
 export async function resolveToDataUrl(sig) {
   if (!sig || sig.startsWith("data:")) return sig;
   const blob = await getBlob(storageRef(storage, sig));
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => resolve(e.target.result);
+    reader.onerror = () => reject(reader.error || new Error("Failed to read signature blob"));
     reader.readAsDataURL(blob);
   });
 }

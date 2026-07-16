@@ -32,9 +32,16 @@ serviceAccountKey.json
 # Admin seed/utility scripts — contain hardcoded credentials for real accounts
 scripts/
 
-# Local Claude Code settings (personal, machine-specific)
-.claude/settings.local.json
-.claude/scheduled_tasks.lock
+# Local Claude Code settings and working files (personal, not for GitHub)
+.claude/
+
+# Thesis chapter working drafts (internal reference, not for GitHub)
+Chapter1_Introduction.md
+Chapter2_Literature_Review.md
+Chapter3_System_Development_Methodology.md
+Chapter4_Requirement_Analysis_and_Design.md
+Chapter5_Implementation_and_Testing.md
+Chapter6_Conclusion.md
 
 # Personal presentation aid, not project source
 SFMS-Code-Cheat-Sheet.pdf

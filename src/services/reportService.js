@@ -17,22 +17,31 @@ export async function getApprovedTransactionsForReport({
   programmeCode,
   programmeCodes,
 }) {
-  let q;
+  let docs;
   if (role === "treasurer") {
-    q = query(transactionsRef, where("createdBy", "==", uid));
+    const snapshot = await getDocs(query(transactionsRef, where("createdBy", "==", uid)));
+    docs = snapshot.docs;
   } else if (role === "advisor" && clubs?.length) {
-    q = query(transactionsRef, where("createdByClub", "in", clubs.slice(0, 30)));
+    // Firestore's "in" operator accepts at most 30 values per clause, so an
+    // Advisor assigned to more than 30 clubs is queried in chunks of 30 and
+    // the results merged, rather than silently truncating to the first 30.
+    docs = [];
+    for (let i = 0; i < clubs.length; i += 30) {
+      const chunk = clubs.slice(i, i + 30);
+      const snapshot = await getDocs(query(transactionsRef, where("createdByClub", "in", chunk)));
+      docs.push(...snapshot.docs);
+    }
   } else if ((role === "bendahari_kelab" || role === "pegawai") && club) {
-    q = query(transactionsRef, where("createdByClub", "==", club));
+    const snapshot = await getDocs(query(transactionsRef, where("createdByClub", "==", club)));
+    docs = snapshot.docs;
   } else if (role === "admin") {
-    q = query(transactionsRef);
+    const snapshot = await getDocs(query(transactionsRef));
+    docs = snapshot.docs;
   } else {
     return [];
   }
 
-  const snapshot = await getDocs(q);
-
-  let records = snapshot.docs.map((docItem) => ({
+  let records = docs.map((docItem) => ({
     id: docItem.id,
     ...docItem.data(),
   }));
