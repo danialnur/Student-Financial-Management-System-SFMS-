@@ -750,21 +750,21 @@ export default function TreasurerDashboard() {
               })()}
             </div>
 
-            <div className="mb-8 flex justify-end">
-              <Link
-                to="/transaksi/sunting"
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-red-900 hover:border-red-900 hover:text-white"
-              >
-                Sunting Transaksi
-              </Link>
-            </div>
-
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-red-800">Tindakan Pantas</p>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <Link to="/treasurer/add-transaction" className="group rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition-all hover:border-red-800 hover:shadow-md">
                 <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-red-100 text-red-800 font-bold text-xl transition group-hover:bg-red-900 group-hover:text-white">+</div>
                 <h2 className="font-semibold text-gray-900">Tambah Transaksi</h2>
                 <p className="mt-1 text-sm text-gray-500">Cipta rekod pendapatan atau perbelanjaan baru.</p>
+              </Link>
+              <Link to="/transaksi/sunting" className="group rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition-all hover:border-red-800 hover:shadow-md">
+                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-red-100 text-red-800 transition group-hover:bg-red-900 group-hover:text-white">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </div>
+                <h2 className="font-semibold text-gray-900">Sunting Transaksi</h2>
+                <p className="mt-1 text-sm text-gray-500">Cari dan sunting transaksi sedia ada.</p>
               </Link>
               <Link to="/treasurer/receipts" className="group rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition-all hover:border-red-800 hover:shadow-md">
                 <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-red-100 text-red-800 transition group-hover:bg-red-900 group-hover:text-white">

@@ -126,20 +126,9 @@ export default function AdvisorDashboard() {
           );
         })()}
 
-        {clubs.length > 0 && (
-          <div className="flex justify-end">
-            <Link
-              to="/transaksi/sunting"
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-red-900 hover:border-red-900 hover:text-white"
-            >
-              Sunting Transaksi
-            </Link>
-          </div>
-        )}
-
         {/* Quick actions */}
         <p className="text-xs font-semibold uppercase tracking-wider text-red-800">Tindakan Pantas</p>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-3">
           <Link to="/advisor/approvals" className="group rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition-all hover:border-red-800 hover:shadow-md">
             <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-red-100 text-red-800 font-bold text-xl transition group-hover:bg-red-900 group-hover:text-white">✓</div>
             <h2 className="font-semibold text-gray-900">Kelulusan Borang</h2>
@@ -151,6 +140,15 @@ export default function AdvisorDashboard() {
             <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-red-100 text-red-800 font-bold text-xl transition group-hover:bg-red-900 group-hover:text-white">↓</div>
             <h2 className="font-semibold text-gray-900">Penyata Kewangan</h2>
             <p className="mt-1 text-sm text-gray-500">Lihat transaksi dan pratonton laporan PDF.</p>
+          </Link>
+          <Link to="/transaksi/sunting" className="group rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition-all hover:border-red-800 hover:shadow-md">
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-red-100 text-red-800 transition group-hover:bg-red-900 group-hover:text-white">
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+              </svg>
+            </div>
+            <h2 className="font-semibold text-gray-900">Sunting Transaksi</h2>
+            <p className="mt-1 text-sm text-gray-500">Cari dan semak transaksi mengikut kelab anda.</p>
           </Link>
         </div>
 

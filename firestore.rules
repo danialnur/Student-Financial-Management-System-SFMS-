@@ -50,11 +50,18 @@ service cloud.firestore {
                     request.auth.uid == userId ||
                     isAdmin() ||
                     ((isBendahariKelab() || isAdvisor() || isPegawai()) && resource.data.role == 'treasurer') ||
+                    // Mirror of the rule above — a treasurer resolving which advisor/
+                    // bendahari_kelab/pegawai will act on their own submission (Status
+                    // Penyerahan Borang's "Disemak Oleh"). Can't be scoped to just their
+                    // own club here since a treasurer's club isn't tracked on their own
+                    // profile, only on programmeAccess/localStorage.
+                    (isTreasurer() && resource.data.role in ['advisor', 'bendahari_kelab', 'pegawai']) ||
                     isPendingBendahariKelabForMyClub(resource.data)
                   );
       allow list: if isSignedIn() && (
                     isAdmin() ||
                     ((isBendahariKelab() || isAdvisor() || isPegawai()) && resource.data.role == 'treasurer') ||
+                    (isTreasurer() && resource.data.role in ['advisor', 'bendahari_kelab', 'pegawai']) ||
                     isPendingBendahariKelabForMyClub(resource.data)
                   );
       // Self-registration: treasurer is active immediately; bendahari_kelab

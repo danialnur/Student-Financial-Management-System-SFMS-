@@ -111,6 +111,17 @@ export default function PegawaiDashboard() {
             </div>
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-100 text-green-700 text-lg font-bold">↓</span>
           </Link>
+
+          <Link
+            to="/transaksi/sunting"
+            className="flex items-center justify-between rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition hover:bg-gray-50"
+          >
+            <div>
+              <p className="text-sm font-bold text-gray-900">Sunting Transaksi</p>
+              <p className="mt-0.5 text-xs text-gray-500">Cari dan semak transaksi mengikut kelab diselia</p>
+            </div>
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-600 text-lg font-bold">✎</span>
+          </Link>
         </div>
       </div>
     </div>

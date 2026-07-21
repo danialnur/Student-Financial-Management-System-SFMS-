@@ -84,6 +84,20 @@ export async function getPendingBendahariKelabForClubs(clubs) {
   return results.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
 }
 
+// Active user(s) currently holding a reviewer role for a given club/category —
+// used to show who is actually expected to act on a submission (approve/reject),
+// as opposed to every role that can merely view it.
+export async function getActiveReviewersByScope(role, scopeValue) {
+  if (!scopeValue) return [];
+  const constraints = [where("role", "==", role), where("accountStatus", "==", "active")];
+  if (role === "advisor") constraints.push(where("clubs", "array-contains", scopeValue));
+  else if (role === "bendahari_kelab") constraints.push(where("club", "==", scopeValue));
+  else if (role === "pegawai") constraints.push(where("category", "==", scopeValue));
+  else return [];
+  const snap = await getDocs(query(usersRef, ...constraints));
+  return snap.docs.map(d => d.data().username).filter(Boolean);
+}
+
 // Admin — pending advisor/pegawai self-registrations
 export async function getPendingAdminApprovals() {
   const snap = await getDocs(query(usersRef, where("accountStatus", "==", "pending_admin")));

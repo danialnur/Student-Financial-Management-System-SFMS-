@@ -62,6 +62,9 @@ const PASSWORD_RULES = [
 
 const isPasswordStrong = (p) => PASSWORD_RULES.every((r) => r.test(p));
 
+const MATRIC_NUMBER_LENGTH = 9; // e.g. "A20EC0001"
+const STAFF_NUMBER_LENGTH  = 7; // e.g. "SU12345"
+
 const formatIcNumber = (raw) => {
   const digits = raw.replace(/\D/g, "").slice(0, 12);
   if (digits.length <= 6) return digits;
@@ -128,11 +131,19 @@ export default function RegisterPage() {
     else if (form.icNumber.replace(/\D/g, "").length !== 12)
       errors.icNumber = "No. kad pengenalan mestilah 12 digit.";
 
-    if (form.role === "treasurer" && !form.matricNumber.trim())
-      errors.matricNumber = "No. matrik diperlukan.";
+    if (form.role === "treasurer") {
+      if (!form.matricNumber.trim())
+        errors.matricNumber = "No. matrik diperlukan.";
+      else if (form.matricNumber.trim().length !== MATRIC_NUMBER_LENGTH)
+        errors.matricNumber = `No. matrik mestilah tepat ${MATRIC_NUMBER_LENGTH} aksara.`;
+    }
 
-    if ((form.role === "advisor" || form.role === "pegawai") && !form.staffNumber.trim())
-      errors.staffNumber = "No. staf diperlukan.";
+    if (form.role === "advisor" || form.role === "pegawai") {
+      if (!form.staffNumber.trim())
+        errors.staffNumber = "No. staf diperlukan.";
+      else if (form.staffNumber.trim().length !== STAFF_NUMBER_LENGTH)
+        errors.staffNumber = `No. staf mestilah tepat ${STAFF_NUMBER_LENGTH} aksara.`;
+    }
 
     if (form.role === "bendahari_kelab" && !form.club)
       errors.club = "Sila pilih kelab.";
@@ -322,6 +333,7 @@ export default function RegisterPage() {
                     onChange={handleChange}
                     className={field("matricNumber")}
                     autoComplete="off"
+                    maxLength={MATRIC_NUMBER_LENGTH}
                   />
                   {fieldErrors.matricNumber && (
                     <p className="mt-1 text-xs text-red-600">{fieldErrors.matricNumber}</p>
@@ -344,6 +356,7 @@ export default function RegisterPage() {
                     onChange={handleChange}
                     className={field("staffNumber")}
                     autoComplete="off"
+                    maxLength={STAFF_NUMBER_LENGTH}
                   />
                   {fieldErrors.staffNumber && (
                     <p className="mt-1 text-xs text-red-600">{fieldErrors.staffNumber}</p>

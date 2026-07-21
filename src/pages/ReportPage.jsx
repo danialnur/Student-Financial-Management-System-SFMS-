@@ -4,7 +4,8 @@ import PageHeader from "../components/PageHeader";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { getApprovedTransactionsForReport } from "../services/reportService";
-import { submitBorang, updateBorangFields, getBorangByUser } from "../services/formService";
+import { submitBorang, updateBorangFields, getBorangByUser, getIntendedReviewerRole } from "../services/formService";
+import { getActiveReviewersByScope } from "../services/userService";
 import { getTransactionsByUser } from "../services/transactionService";
 import { getProgrammesByClub } from "../services/programmeService";
 import { submitPdfBorang } from "../services/pdfSubmissionService";
@@ -253,6 +254,11 @@ export default function ReportPage({ tab: forcedTab }) {
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [formMsg, setFormMsg]               = useState({ type:"", text:"" });
   const [submissions, setSubmissions]       = useState([]);
+  // "Disemak Oleh" doesn't come from the submission doc itself — it's resolved
+  // live per (intended reviewer role, club/category) pair, since we want who
+  // will actually act on it, not everyone who merely has view access to it.
+  const [reviewerNames, setReviewerNames]   = useState({}); // "role|scope" -> "user1, user2"
+  const [submissionSort, setSubmissionSort] = useState({ col: null, dir: null });
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
   const [hasDraft, setHasDraft]             = useState(false);
   const [draftList, setDraftList]           = useState([]);
@@ -323,9 +329,58 @@ export default function ReportPage({ tab: forcedTab }) {
     catch (e) { console.error(e); } finally { setLoadingSubmissions(false); }
   };
 
+  const handleSubmissionSort = (col) => {
+    setSubmissionSort(prev => {
+      if (prev.col !== col)   return { col, dir: "asc" };
+      if (prev.dir === "asc") return { col, dir: "desc" };
+      return { col: null, dir: null };
+    });
+  };
+
+  const reviewerNameFor = (sub) => {
+    const role = getIntendedReviewerRole(sub);
+    const scope = role === "pegawai" ? sub.createdByCategory : sub.createdByClub;
+    return reviewerNames[`${role}|${scope}`] || "";
+  };
+
+  const sortedSubmissions = useMemo(() => {
+    const { col, dir } = submissionSort;
+    if (!col) return submissions;
+    return [...submissions].sort((a, b) => {
+      let va, vb;
+      if (col === "borang")  { va = a.formName || "";  vb = b.formName || ""; }
+      else if (col === "tarikh") { va = a.createdAt?.seconds ?? 0; vb = b.createdAt?.seconds ?? 0; }
+      else if (col === "status") { va = statusLabel(a.status); vb = statusLabel(b.status); }
+      else if (col === "disemak") { va = reviewerNameFor(a); vb = reviewerNameFor(b); }
+      else return 0;
+      if (typeof va === "number") return dir === "asc" ? va - vb : vb - va;
+      const cmp = va.localeCompare(vb);
+      return dir === "asc" ? cmp : -cmp;
+    });
+  }, [submissions, submissionSort, reviewerNames]);
+
   useEffect(() => {
     if (activeTab === "borang" && userRole === "treasurer") { loadSubmissions(); refreshDraftList(); }
   }, [activeTab, currentUser?.uid]);
+
+  // Resolve the actual reviewer username(s) once per unique (role, scope) pair
+  // present in the current submissions, instead of one lookup per row.
+  useEffect(() => {
+    if (!submissions.length) return;
+    const pairs = new Map();
+    submissions.forEach(sub => {
+      const role = getIntendedReviewerRole(sub);
+      const scope = role === "pegawai" ? sub.createdByCategory : sub.createdByClub;
+      if (scope) pairs.set(`${role}|${scope}`, { role, scope });
+    });
+    const toFetch = [...pairs.entries()].filter(([key]) => !(key in reviewerNames));
+    if (!toFetch.length) return;
+    Promise.all(toFetch.map(([key, { role, scope }]) =>
+      getActiveReviewersByScope(role, scope).then(names => [key, names.join(", ")])
+    )).then(results => {
+      setReviewerNames(prev => ({ ...prev, ...Object.fromEntries(results) }));
+    }).catch(console.error);
+  }, [submissions]);
 
   // Form 8 (Penyata Kewangan + Senarai Resit): Wang Masuk / Wang Keluar totals and the
   // Senarai Resit Bayaran rows are derived live from the treasurer's own recorded
@@ -1128,20 +1183,36 @@ export default function ReportPage({ tab: forcedTab }) {
                   <table className="min-w-full">
                     <thead>
                       <tr className="bg-red-900 text-left">
-                        <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Jenis Borang</th>
-                        <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Tarikh Hantar</th>
-                        <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Status</th>
-                        <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Disemak Oleh</th>
+                        {[
+                          { col: "borang",  label: "Jenis Borang" },
+                          { col: "tarikh",  label: "Tarikh Hantar" },
+                          { col: "status",  label: "Status" },
+                          { col: "disemak", label: "Disemak Oleh" },
+                        ].map(({ col, label }) => (
+                          <th key={col} className="px-4 py-3">
+                            <button
+                              type="button"
+                              onClick={() => handleSubmissionSort(col)}
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-red-100 hover:text-white"
+                            >
+                              {label}
+                              <span className="flex flex-col leading-none">
+                                <span className={submissionSort.col===col && submissionSort.dir==="asc" ? "text-white" : "text-red-400"}>▲</span>
+                                <span className={submissionSort.col===col && submissionSort.dir==="desc" ? "text-white" : "text-red-400"}>▼</span>
+                              </span>
+                            </button>
+                          </th>
+                        ))}
                         <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-red-100">Tindakan</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-red-50">
-                      {submissions.map(sub=>(
+                      {sortedSubmissions.map(sub=>(
                         <tr key={sub.id} className="hover:bg-red-50 transition-colors">
                           <td className="px-4 py-3 text-sm font-medium text-gray-900">{sub.formName}</td>
                           <td className="px-4 py-3 text-sm text-gray-500">{sub.createdAt?.toDate?sub.createdAt.toDate().toLocaleDateString("ms-MY"):"—"}</td>
                           <td className="px-4 py-3"><span className={statusBadge(sub.status)}>{statusLabel(sub.status)}</span></td>
-                          <td className="px-4 py-3 text-sm text-gray-500">{sub.reviewedByEmail||<span className="text-gray-400">—</span>}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500">{reviewerNameFor(sub)||<span className="text-gray-400">—</span>}</td>
                           <td className="px-4 py-3">
                             <div className="flex flex-wrap gap-2">
                               {["menunggu","disemak"].includes(sub.status) && (

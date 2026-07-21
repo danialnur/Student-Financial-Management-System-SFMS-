@@ -191,15 +191,6 @@ export default function BendahariKelabDashboard() {
               );
             })()}
 
-            <div className="mb-8 flex justify-end">
-              <Link
-                to="/transaksi/sunting"
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-red-900 hover:border-red-900 hover:text-white"
-              >
-                Sunting Transaksi
-              </Link>
-            </div>
-
             {/* Quick actions */}
             <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
               <Link
@@ -263,6 +254,17 @@ export default function BendahariKelabDashboard() {
                 <span className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold ${pendingAccessCount > 0 ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-400"}`}>
                   {pendingAccessCount}
                 </span>
+              </Link>
+
+              <Link
+                to="/transaksi/sunting"
+                className="flex items-center justify-between rounded-2xl border border-gray-200 bg-white p-5 shadow-sm transition hover:bg-gray-50"
+              >
+                <div>
+                  <p className="text-sm font-bold text-gray-900">Sunting Transaksi</p>
+                  <p className="mt-0.5 text-xs text-gray-500">Cari dan sunting transaksi sedia ada</p>
+                </div>
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 text-gray-600 text-lg font-bold">✎</span>
               </Link>
             </div>
 
