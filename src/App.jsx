@@ -12,6 +12,7 @@ import PegawaiSelectClubPage from "./pages/PegawaiSelectClubPage";
 import AddTransactionPage from "./pages/AddTransactionPage";
 import EditTransactionPage from "./pages/EditTransactionPage";
 import TransactionHistoryPage from "./pages/TransactionHistoryPage";
+import TransactionEditSearchPage from "./pages/TransactionEditSearchPage";
 import ApprovalPage from "./pages/ApprovalPage";
 import UserManagementPage from "./pages/UserManagementPage";
 import ReportPage from "./pages/ReportPage";
@@ -43,12 +44,29 @@ export default function App() {
         }
       />
 
+      {/* ── Transaksi (semua peranan) ── */}
+      <Route
+        path="/transaksi/sunting"
+        element={
+          <ProtectedRoute allowedRoles={["treasurer", "advisor", "admin", "bendahari_kelab", "pegawai"]}>
+            <TransactionEditSearchPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/transaksi/sunting/:id"
+        element={
+          <ProtectedRoute allowedRoles={["treasurer", "advisor", "admin", "bendahari_kelab", "pegawai"]}>
+            <EditTransactionPage />
+          </ProtectedRoute>
+        }
+      />
+
       {/* ── Treasurer ── */}
       <Route path="/treasurer/dashboard" element={<ProtectedRoute allowedRoles={["treasurer"]}><TreasurerDashboard /></ProtectedRoute>} />
       <Route path="/treasurer/request-access" element={<ProtectedRoute allowedRoles={["treasurer"]}><TreasurerRequestAccessPage /></ProtectedRoute>} />
       <Route path="/treasurer/add-transaction" element={<ProtectedRoute allowedRoles={["treasurer"]}><AddTransactionPage /></ProtectedRoute>} />
       <Route path="/treasurer/transactions" element={<ProtectedRoute allowedRoles={["treasurer"]}><TransactionHistoryPage /></ProtectedRoute>} />
-      <Route path="/treasurer/edit-transaction/:id" element={<ProtectedRoute allowedRoles={["treasurer"]}><EditTransactionPage /></ProtectedRoute>} />
       <Route path="/treasurer/receipts" element={<ProtectedRoute allowedRoles={["treasurer"]}><ReceiptListPage /></ProtectedRoute>} />
       <Route path="/treasurer/borang-kewangan" element={<ProtectedRoute allowedRoles={["treasurer"]}><ReportPage tab="borang" /></ProtectedRoute>} />
       <Route path="/treasurer/penyata-kewangan" element={<ProtectedRoute allowedRoles={["treasurer"]}><ReportPage tab="laporan" /></ProtectedRoute>} />

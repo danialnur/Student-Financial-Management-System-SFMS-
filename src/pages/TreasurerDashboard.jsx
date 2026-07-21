@@ -750,6 +750,15 @@ export default function TreasurerDashboard() {
               })()}
             </div>
 
+            <div className="mb-8 flex justify-end">
+              <Link
+                to="/transaksi/sunting"
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-red-900 hover:border-red-900 hover:text-white"
+              >
+                Sunting Transaksi
+              </Link>
+            </div>
+
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-red-800">Tindakan Pantas</p>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <Link to="/treasurer/add-transaction" className="group rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition-all hover:border-red-800 hover:shadow-md">

@@ -305,11 +305,17 @@ export default function ApprovalPage() {
     const genFn = PDF_GENERATORS[item.formType];
     const cfg = FORMS_CONFIG.find(f => f.id === item.formType);
     if (!genFn || !cfg) { setBorangError("Format PDF tidak tersedia untuk jenis borang ini."); return; }
-    const mergedData = { ...item.formData, ...(item.reviewerData ?? {}) };
-    const doc = genFn(mergedData, item.rows, item.submitterSignature ?? null);
-    if (!doc) return;
-    const titleSlug = cfg.title.replace(/[^a-zA-Z0-9\s]/g,"").trim().replace(/\s+/g,"-").toLowerCase();
-    openPdf(doc, `${titleSlug}.pdf`);
+    try {
+      setBorangError("");
+      const mergedData = { ...item.formData, ...(item.reviewerData ?? {}) };
+      const doc = genFn(mergedData, item.rows, item.submitterSignature ?? null);
+      if (!doc) return;
+      const titleSlug = cfg.title.replace(/[^a-zA-Z0-9\s]/g,"").trim().replace(/\s+/g,"-").toLowerCase();
+      openPdf(doc, `${titleSlug}.pdf`);
+    } catch (e) {
+      console.error(e);
+      setBorangError(`Gagal memuat turun PDF. ${e?.message ?? "Sila cuba lagi."}`);
+    }
   };
 
   const handleRequestDelete = (kind, item) => setDeleteTarget({ kind, item });

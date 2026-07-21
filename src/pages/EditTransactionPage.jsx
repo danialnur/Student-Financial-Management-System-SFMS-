@@ -24,10 +24,17 @@ const INCOME_CATEGORIES = [
   "Lain-lain",
 ];
 
+function canEditTransaction(data, { userRole, currentUser, userProfile }) {
+  if (userRole === "admin") return true;
+  if (userRole === "treasurer") return data.createdBy === currentUser.uid;
+  if (userRole === "bendahari_kelab") return data.createdByClub === userProfile?.club;
+  return false;
+}
+
 export default function EditTransactionPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
+  const { currentUser, userRole, userProfile } = useAuth();
 
   const [form, setForm] = useState({
     date: "",
@@ -59,8 +66,11 @@ export default function EditTransactionPage() {
         setErrorMsg("");
         const data = await getTransactionById(id);
 
-        if (!data)                              { setErrorMsg("Transaksi tidak dijumpai."); return; }
-        if (data.createdBy !== currentUser.uid) { setErrorMsg("Anda tidak dibenarkan menyunting transaksi ini."); return; }
+        if (!data) { setErrorMsg("Transaksi tidak dijumpai."); return; }
+        if (!canEditTransaction(data, { userRole, currentUser, userProfile })) {
+          setErrorMsg("Anda tidak dibenarkan menyunting transaksi ini.");
+          return;
+        }
 
         setTransaction(data);
         setForm({
@@ -80,8 +90,8 @@ export default function EditTransactionPage() {
       }
     };
 
-    if (currentUser?.uid) loadTransaction();
-  }, [id, currentUser]);
+    if (currentUser?.uid && userRole) loadTransaction();
+  }, [id, currentUser, userRole, userProfile]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -113,6 +123,8 @@ export default function EditTransactionPage() {
     if (Number(form.amount) <= 0)
       return setErrorMsg("Jumlah mestilah lebih daripada 0.");
 
+    if (!window.confirm("Adakah anda pasti mahu mengemaskini transaksi ini?")) return;
+
     try {
       setSaving(true);
       await updateTransactionFields(id, {
@@ -125,7 +137,7 @@ export default function EditTransactionPage() {
         programmeName: form.programmeName,
       });
       setMessage("Transaksi berjaya dikemaskini.");
-      setTimeout(() => navigate("/treasurer/transactions"), 800);
+      setTimeout(() => navigate(-1), 800);
     } catch (error) {
       console.error(error);
       setErrorMsg("Gagal mengemaskini transaksi.");

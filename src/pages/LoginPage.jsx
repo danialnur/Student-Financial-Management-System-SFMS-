@@ -28,6 +28,8 @@ const EyeOffIcon = () => (
   </svg>
 );
 
+const REMEMBERED_USERNAME_KEY = "sfms_remembered_username";
+
 const getErrorMessage = (code) => {
   switch (code) {
     case "auth/user-not-found":         return "Tiada akaun dijumpai dengan alamat e-mel ini.";
@@ -45,10 +47,11 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const { currentUser, userRole, userProfile, loading: authLoading } = useAuth();
 
-  const [email, setEmail]             = useState("");
+  const rememberedUsername = localStorage.getItem(REMEMBERED_USERNAME_KEY) || "";
+  const [email, setEmail]             = useState(rememberedUsername);
   const [password, setPassword]       = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe]   = useState(false);
+  const [rememberMe, setRememberMe]   = useState(!!rememberedUsername);
   const [errorMsg, setErrorMsg]       = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
   const [loading, setLoading]         = useState(false);
@@ -98,6 +101,9 @@ export default function LoginPage() {
         auth,
         rememberMe ? browserLocalPersistence : browserSessionPersistence
       );
+
+      if (rememberMe) localStorage.setItem(REMEMBERED_USERNAME_KEY, email.trim());
+      else localStorage.removeItem(REMEMBERED_USERNAME_KEY);
 
       const loginEmail = await getEmailByUsername(email.trim());
       if (!loginEmail) {

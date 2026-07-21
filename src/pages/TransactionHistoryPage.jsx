@@ -147,7 +147,7 @@ export default function TransactionHistoryPage() {
                       <td className="px-4 py-3">
                         <div className="flex gap-2">
                           <Link
-                            to={`/treasurer/edit-transaction/${item.id}`}
+                            to={`/transaksi/sunting/${item.id}`}
                             className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700"
                           >
                             Sunting

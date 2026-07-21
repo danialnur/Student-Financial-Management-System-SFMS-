@@ -4,7 +4,7 @@ import PageHeader from "../components/PageHeader";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { getApprovedTransactionsForReport } from "../services/reportService";
-import { submitBorang, getBorangByUser } from "../services/formService";
+import { submitBorang, updateBorangFields, getBorangByUser } from "../services/formService";
 import { getTransactionsByUser } from "../services/transactionService";
 import { getProgrammesByClub } from "../services/programmeService";
 import { submitPdfBorang } from "../services/pdfSubmissionService";
@@ -243,9 +243,14 @@ export default function ReportPage({ tab: forcedTab }) {
   const [loadingClubProgrammes, setLoadingClubProgrammes] = useState(false);
   const [selectedProgCodes, setSelectedProgCodes]   = useState([]); // bendahari_kelab report filter — empty = all
   const [openFormId, setOpenFormId]         = useState(null);
+  // Set while editing an existing (still-pending) submission via "Sunting" in
+  // Status Penyerahan Borang, instead of creating a new one — reuses the same
+  // form modal/state as a fresh submission but routes to updateBorangFields.
+  const [editingSubmissionId, setEditingSubmissionId] = useState(null);
   const [formData, setFormData]             = useState({});
   const [rows, setRows]                     = useState([]);
   const [submitting, setSubmitting]         = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [formMsg, setFormMsg]               = useState({ type:"", text:"" });
   const [submissions, setSubmissions]       = useState([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
@@ -277,6 +282,10 @@ export default function ReportPage({ tab: forcedTab }) {
   // Confirmation popups shown before actually submitting (digital form / direct PDF upload)
   const [confirmSubmitBorang, setConfirmSubmitBorang] = useState(false);
   const [confirmDirectSubmit, setConfirmDirectSubmit] = useState(false);
+  // Shown after a successful submission (either the digital form or the direct
+  // PDF upload) — requires an explicit "OK" click rather than auto-dismissing,
+  // so the user has clear, deliberate confirmation the submission went through.
+  const [submitSuccessPopup, setSubmitSuccessPopup] = useState(null); // null | { kind:"borang"|"direct", text }
 
   useEffect(() => {
     if (!currentUser?.uid) return;
@@ -433,7 +442,30 @@ export default function ReportPage({ tab: forcedTab }) {
     if (!loadDraftIfExists) { setActiveSig(null); setSuratKelulusan(null); setMandatoryFiles({}); }
   };
 
-  const closeForm = () => { setOpenFormId(null); setFormData({}); setRows([]); setFormMsg({type:"",text:""}); setHasDraft(false); setActiveSig(null); setSuratKelulusan(null); setMandatoryFiles({}); setSubmitTo(null); };
+  const closeForm = () => { setOpenFormId(null); setFormData({}); setRows([]); setFormMsg({type:"",text:""}); setHasDraft(false); setActiveSig(null); setSuratKelulusan(null); setMandatoryFiles({}); setSubmitTo(null); setEditingSubmissionId(null); };
+
+  // "Sunting" on an existing, still-pending submission — loads its saved
+  // content into the same form modal used for new submissions, but leaves the
+  // draft system untouched (see the editingSubmissionId guards in the field/row
+  // change handlers below) so editing doesn't clobber an unrelated in-progress draft.
+  const handleEditSubmission = (sub) => {
+    const config = FORMS_CONFIG.find(f => f.id === sub.formType);
+    if (!config) return;
+    setEditingSubmissionId(sub.id);
+    setFormData(sub.formData ?? {});
+    setRows(sub.rows?.length ? sub.rows : initialRowsFor(config));
+    setActiveSig(sub.submitterSignature ?? null);
+    setSuratKelulusan(sub.suratKelulusanUrl ? { uploading: false, name: sub.suratKelulusanName, url: sub.suratKelulusanUrl } : null);
+    const files = {};
+    (config.mandatoryAttachments ?? []).forEach(att => {
+      files[att.key] = (sub[`${att.key}Files`] ?? []).map((f, i) => ({ id: `existing-${att.key}-${i}`, uploading: false, name: f.name, url: f.url, path: f.path }));
+    });
+    setMandatoryFiles(files);
+    setSubmitTo(sub.submitTo ?? null);
+    setHasDraft(false);
+    setFormMsg({type:"",text:""});
+    setOpenFormId(config.id);
+  };
 
   // "Isi Borang Baru" click — warn first if an unfinished draft for this exact form already exists,
   // since opening fresh would otherwise silently overwrite it on the next keystroke.
@@ -459,15 +491,15 @@ export default function ReportPage({ tab: forcedTab }) {
   };
 
   const handleFieldChange = (key, value) => {
-    setFormData(prev => { const u={...prev,[key]:value}; if(openFormId&&currentUser?.uid) saveDraft(openFormId,currentUser.uid,u,rows); return u; });
+    setFormData(prev => { const u={...prev,[key]:value}; if(openFormId&&currentUser?.uid&&!editingSubmissionId) saveDraft(openFormId,currentUser.uid,u,rows); return u; });
   };
 
   const handleMultiFieldChange = (updates) => {
-    setFormData(prev => { const u={...prev,...updates}; if(openFormId&&currentUser?.uid) saveDraft(openFormId,currentUser.uid,u,rows); return u; });
+    setFormData(prev => { const u={...prev,...updates}; if(openFormId&&currentUser?.uid&&!editingSubmissionId) saveDraft(openFormId,currentUser.uid,u,rows); return u; });
   };
 
   const handleRowChange = (ri, ck, val) => {
-    setRows(prev => { const u=prev.map((r,i)=>i===ri?{...r,[ck]:val}:r); if(openFormId&&currentUser?.uid) saveDraft(openFormId,currentUser.uid,formData,u); return u; });
+    setRows(prev => { const u=prev.map((r,i)=>i===ri?{...r,[ck]:val}:r); if(openFormId&&currentUser?.uid&&!editingSubmissionId) saveDraft(openFormId,currentUser.uid,formData,u); return u; });
   };
 
   const addRow = () => { const cfg=FORMS_CONFIG.find(f=>f.id===openFormId); setRows(p=>[...p,emptyRowFor(cfg)]); };
@@ -631,50 +663,80 @@ export default function ReportPage({ tab: forcedTab }) {
     const config=FORMS_CONFIG.find(f=>f.id===openFormId);
     const validationError = validateSubmission(config);
     if (validationError) { setFormMsg({type:"error",text:validationError}); return; }
+    const isEdit = !!editingSubmissionId;
     const lastKey = `sfms_last_form_${currentUser?.uid}`;
     const last = Number(localStorage.getItem(lastKey) || 0);
     const elapsed = Date.now() - last;
-    if (elapsed < FORM_COOLDOWN_MS) {
+    // The submit-cooldown only guards against spamming new submissions —
+    // editing an existing one isn't creating anything new, so it isn't gated by it.
+    if (!isEdit && elapsed < FORM_COOLDOWN_MS) {
       const wait = Math.ceil((FORM_COOLDOWN_MS - elapsed) / 1000);
       setFormMsg({type:"error",text:`Sila tunggu ${wait} saat sebelum menghantar borang lagi.`});
       return;
     }
     try {
       setSubmitting(true); setFormMsg({type:"",text:""});
-      localStorage.setItem(`sfms_last_form_${currentUser?.uid}`, String(Date.now()));
-      const createdByClub = localStorage.getItem(`sfms_club_${currentUser.uid}`) || "";
       const finalFormData = buildSubmissionFormData(formData, config);
       const needsSig = config?.sections?.some(s=>s.fields?.some(f=>f.type==="signature"));
       // Persisted (not just used ephemerally for the live PDF preview) so a
       // complete PDF — including this signature — can be regenerated later,
       // e.g. once a reviewer has approved and added their own section.
       const submitterSignature = needsSig ? await resolveToDataUrl(activeSig) : null;
-      await submitBorang({
-        formType:config.id, formName:config.title, formData:finalFormData, ...(config.rowColumns?{rows}:{}),
-        createdBy:currentUser.uid, createdByEmail:currentUser.email, createdByClub,
+      const contentPayload = {
+        formData:finalFormData, ...(config.rowColumns?{rows}:{}),
         suratKelulusanUrl:suratKelulusan?.url ?? null, suratKelulusanName:suratKelulusan?.name ?? null,
         submitterSignature,
         ...(config.allowSubmitToChoice ? { submitTo } : {}),
         ...mandatoryAttachmentPayload(config),
-      });
-      clearDraft(config.id,currentUser.uid); refreshDraftList();
-      setFormMsg({type:"success",text:"Borang berjaya dihantar untuk kelulusan."});
-      await loadSubmissions(); setTimeout(closeForm,1800);
-    } catch (e) { console.error(e); setFormMsg({type:"error",text:`Gagal menghantar borang. ${e?.code ?? e?.message ?? "Sila cuba lagi."}`}); }
+      };
+      if (isEdit) {
+        await updateBorangFields(editingSubmissionId, contentPayload);
+        await loadSubmissions();
+        setSubmitSuccessPopup({ kind: "borang-edit", text: "Borang berjaya dikemaskini." });
+      } else {
+        localStorage.setItem(lastKey, String(Date.now()));
+        const createdByClub = localStorage.getItem(`sfms_club_${currentUser.uid}`) || "";
+        await submitBorang({
+          formType:config.id, formName:config.title, createdBy:currentUser.uid, createdByEmail:currentUser.email, createdByClub,
+          ...contentPayload,
+        });
+        clearDraft(config.id,currentUser.uid); refreshDraftList();
+        await loadSubmissions();
+        setSubmitSuccessPopup({ kind: "borang", text: "Borang berjaya dihantar untuk kelulusan." });
+      }
+    } catch (e) { console.error(e); setFormMsg({type:"error",text:`Gagal ${isEdit?"mengemaskini":"menghantar"} borang. ${e?.code ?? e?.message ?? "Sila cuba lagi."}`}); }
     finally { setSubmitting(false); }
+  };
+
+  // "OK" on the success popup — dismiss it, and for the digital-form flow also
+  // close the form modal now (previously this happened automatically on a
+  // timer; now it's tied to the user's explicit acknowledgement instead).
+  const handleAcknowledgeSuccess = () => {
+    const kind = submitSuccessPopup?.kind;
+    setSubmitSuccessPopup(null);
+    if (kind === "borang" || kind === "borang-edit") closeForm();
   };
 
   const handleJanaPdf = async () => {
     const genFn = openFormId ? PDF_GENERATORS[openFormId] : null;
     if (!genFn) return;
     const cfg = FORMS_CONFIG.find(f => f.id === openFormId);
-    const sig = await resolveToDataUrl(activeSig);
-    const doc = genFn(buildSubmissionFormData(formData, cfg), rows, sig);
-    if (!doc) return;
-    const titleSlug = cfg ? cfg.title.replace(/[^a-zA-Z0-9\s]/g,"").trim().replace(/\s+/g,"-").toLowerCase() : "borang";
-    const progCode  = progContext?.code ? progContext.code.toUpperCase() : "";
-    const filename  = `${titleSlug}${progCode ? `-${progCode}` : ""}.pdf`;
-    openPdf(doc, filename);
+    try {
+      setFormMsg({ type: "", text: "" });
+      setDownloadingPdf(true);
+      const sig = await resolveToDataUrl(activeSig);
+      const doc = genFn(buildSubmissionFormData(formData, cfg), rows, sig);
+      if (!doc) return;
+      const titleSlug = cfg ? cfg.title.replace(/[^a-zA-Z0-9\s]/g,"").trim().replace(/\s+/g,"-").toLowerCase() : "borang";
+      const progCode  = progContext?.code ? progContext.code.toUpperCase() : "";
+      const filename  = `${titleSlug}${progCode ? `-${progCode}` : ""}.pdf`;
+      openPdf(doc, filename);
+    } catch (e) {
+      console.error(e);
+      setFormMsg({ type: "error", text: `Gagal memuat turun PDF. ${e?.message ?? "Sila cuba lagi."}` });
+    } finally {
+      setDownloadingPdf(false);
+    }
   };
 
   // Once a submission has been approved, the reviewer may have added their
@@ -684,8 +746,16 @@ export default function ReportPage({ tab: forcedTab }) {
     const genFn = PDF_GENERATORS[sub.formType];
     const cfg = FORMS_CONFIG.find(f => f.id === sub.formType);
     if (!genFn || !cfg) return;
-    const mergedData = { ...sub.formData, ...(sub.reviewerData ?? {}) };
-    const doc = genFn(mergedData, sub.rows, sub.submitterSignature ?? null);
+    setErrorMsg("");
+    let doc;
+    try {
+      const mergedData = { ...sub.formData, ...(sub.reviewerData ?? {}) };
+      doc = genFn(mergedData, sub.rows, sub.submitterSignature ?? null);
+    } catch (e) {
+      console.error(e);
+      setErrorMsg(`Gagal memuat turun PDF. ${e?.message ?? "Sila cuba lagi."}`);
+      return;
+    }
     if (!doc) return;
     const titleSlug = cfg.title.replace(/[^a-zA-Z0-9\s]/g,"").trim().replace(/\s+/g,"-").toLowerCase();
     openPdf(doc, `${titleSlug}-kemaskini.pdf`);
@@ -723,8 +793,8 @@ export default function ReportPage({ tab: forcedTab }) {
         submitTo: directSubmitTo,
         directUpload: true,
       });
-      setDirectMsg({type:"success",text:"PDF berjaya dihantar kepada pihak berkenaan."});
       setDirectFormType(""); setDirectFile(null); setDirectSubmitTo(null);
+      setSubmitSuccessPopup({ kind: "direct", text: "PDF berjaya dihantar kepada pihak berkenaan." });
     } catch (e) { console.error(e); setDirectMsg({type:"error",text:`Gagal menghantar PDF. ${e?.code ?? e?.message ?? "Sila cuba lagi."}`}); }
     finally { setDirectSubmitting(false); }
   };
@@ -1042,6 +1112,8 @@ export default function ReportPage({ tab: forcedTab }) {
               ))}
             </div>
 
+            {errorMsg && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{errorMsg}</div>}
+
             {/* Status Penyerahan Borang */}
             <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
               <div className="border-b border-gray-100 px-6 py-4">
@@ -1071,11 +1143,21 @@ export default function ReportPage({ tab: forcedTab }) {
                           <td className="px-4 py-3"><span className={statusBadge(sub.status)}>{statusLabel(sub.status)}</span></td>
                           <td className="px-4 py-3 text-sm text-gray-500">{sub.reviewedByEmail||<span className="text-gray-400">—</span>}</td>
                           <td className="px-4 py-3">
-                            {sub.status === "diluluskan" && PDF_GENERATORS[sub.formType] ? (
-                              <button onClick={() => handleDownloadUpdatedPdf(sub)} className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-green-700">
-                                Muat Turun PDF Kemaskini
-                              </button>
-                            ) : <span className="text-gray-300">—</span>}
+                            <div className="flex flex-wrap gap-2">
+                              {["menunggu","disemak"].includes(sub.status) && (
+                                <button onClick={() => handleEditSubmission(sub)} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700">
+                                  Sunting
+                                </button>
+                              )}
+                              {PDF_GENERATORS[sub.formType] && (
+                                <button onClick={() => handleDownloadUpdatedPdf(sub)} className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-green-700">
+                                  {sub.status === "diluluskan" ? "Muat Turun PDF Kemaskini" : "Muat Turun PDF"}
+                                </button>
+                              )}
+                              {!["menunggu","disemak"].includes(sub.status) && !PDF_GENERATORS[sub.formType] && (
+                                <span className="text-gray-300">—</span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1234,7 +1316,10 @@ export default function ReportPage({ tab: forcedTab }) {
           <div className="relative w-full max-w-2xl rounded-2xl bg-white shadow-xl mb-8">
             <div className="sticky top-0 z-10 flex items-start justify-between rounded-t-2xl border-b border-gray-100 bg-white px-6 py-4">
               <div>
-                <h3 className="text-base font-bold text-gray-900">{activeFormConfig.title}</h3>
+                <h3 className="text-base font-bold text-gray-900">
+                  {activeFormConfig.title}
+                  {editingSubmissionId && <span className="ml-2 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700 align-middle">Sunting</span>}
+                </h3>
                 <p className="text-xs text-gray-500 mt-0.5">{activeFormConfig.subtitle}</p>
               </div>
               <button onClick={closeForm} className="ml-4 shrink-0 rounded-full p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700">✕</button>
@@ -1517,11 +1602,11 @@ export default function ReportPage({ tab: forcedTab }) {
 
             <div className="flex flex-wrap gap-3 rounded-b-2xl border-t border-gray-100 bg-gray-50 px-6 py-4">
               <button onClick={handleRequestSubmitBorang} disabled={submitting} className="flex-1 rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800 disabled:opacity-60">
-                {submitting?"Menghantar...":"Hantar Borang"}
+                {submitting ? (editingSubmissionId ? "Mengemaskini..." : "Menghantar...") : (editingSubmissionId ? "Kemaskini Borang" : "Hantar Borang")}
               </button>
               {hasPdfGen && (
-                <button onClick={handleJanaPdf} className={`rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${activeSig?"border-green-600 bg-green-600 text-white hover:bg-green-700":"border-green-600 bg-white text-green-700 hover:bg-green-50"}`} title={activeSig?"Muat turun PDF":"Muat turun PDF (tiada tandatangan)"}>
-                  Muat Turun PDF{activeSig ? " ✓" : ""}
+                <button onClick={handleJanaPdf} disabled={downloadingPdf} className={`rounded-xl border px-4 py-2.5 text-sm font-semibold transition disabled:opacity-60 ${activeSig?"border-green-600 bg-green-600 text-white hover:bg-green-700":"border-green-600 bg-white text-green-700 hover:bg-green-50"}`} title={activeSig?"Muat turun PDF":"Muat turun PDF (tiada tandatangan)"}>
+                  {downloadingPdf ? "Memuat turun..." : `Muat Turun PDF${activeSig ? " ✓" : ""}`}
                 </button>
               )}
               <button onClick={closeForm} className="rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-100">Batal</button>
@@ -1654,14 +1739,14 @@ export default function ReportPage({ tab: forcedTab }) {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
               </svg>
             </div>
-            <h3 className="mb-2 text-base font-bold text-gray-900">Sahkan Penghantaran Borang?</h3>
+            <h3 className="mb-2 text-base font-bold text-gray-900">{editingSubmissionId ? "Sahkan Kemaskini Borang?" : "Sahkan Penghantaran Borang?"}</h3>
             <p className="mb-6 text-sm text-gray-500">
-              Borang <span className="font-semibold text-gray-800">{activeFormConfig?.title}</span> akan dihantar untuk kelulusan. Semak semula sebelum menghantar.
+              Borang <span className="font-semibold text-gray-800">{activeFormConfig?.title}</span> {editingSubmissionId ? "akan dikemaskini." : "akan dihantar untuk kelulusan."} Semak semula sebelum menghantar.
             </p>
             <div className="flex gap-3">
               <button onClick={() => setConfirmSubmitBorang(false)} className="flex-1 rounded-xl border border-gray-200 bg-white py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50">Batal</button>
               <button onClick={handleSubmitBorang} disabled={submitting} className="flex-1 rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800 disabled:opacity-60">
-                {submitting ? "Menghantar..." : "Ya, Hantar"}
+                {submitting ? (editingSubmissionId ? "Mengemaskini..." : "Menghantar...") : (editingSubmissionId ? "Ya, Kemaskini" : "Ya, Hantar")}
               </button>
             </div>
           </div>
@@ -1687,6 +1772,24 @@ export default function ReportPage({ tab: forcedTab }) {
                 {directSubmitting ? "Menghantar..." : "Ya, Hantar"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Submission success popup — dismissed only by explicit "OK" ── */}
+      {submitSuccessPopup && (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
+              <svg className="h-7 w-7 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75l2.25 2.25L15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h3 className="mb-2 text-base font-bold text-gray-900">Berjaya!</h3>
+            <p className="mb-6 text-sm text-gray-500">{submitSuccessPopup.text}</p>
+            <button onClick={handleAcknowledgeSuccess} className="w-full rounded-xl bg-red-900 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800">
+              OK
+            </button>
           </div>
         </div>
       )}

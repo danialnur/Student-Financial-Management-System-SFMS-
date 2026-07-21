@@ -191,6 +191,15 @@ export default function BendahariKelabDashboard() {
               );
             })()}
 
+            <div className="mb-8 flex justify-end">
+              <Link
+                to="/transaksi/sunting"
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-red-900 hover:border-red-900 hover:text-white"
+              >
+                Sunting Transaksi
+              </Link>
+            </div>
+
             {/* Quick actions */}
             <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
               <Link

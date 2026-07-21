@@ -10,7 +10,17 @@ export const CHECKERBOARD_BG = "bg-[repeating-conic-gradient(#e5e7eb_0%_25%,#f9f
 // rules — use the SDK's getBlob() instead, which authenticates properly.
 export async function resolveToDataUrl(sig) {
   if (!sig || sig.startsWith("data:")) return sig;
-  const blob = await getBlob(storageRef(storage, sig));
+  // Storage's own getBlob() already retries internally for up to ~120s on a
+  // slow/flaky connection before giving up — this race is just a backstop so
+  // a truly dead connection doesn't hang the UI forever, not a substitute for
+  // that retry budget. A shorter cutoff here would fire *before* a retry that
+  // was about to succeed, which is exactly what happened at 20s.
+  const blob = await Promise.race([
+    getBlob(storageRef(storage, sig)),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Masa tamat memuatkan tandatangan. Sambungan anda ke Firebase Storage terlalu perlahan — sila cuba lagi.")), 130000)
+    ),
+  ]);
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => resolve(e.target.result);
@@ -204,6 +214,15 @@ export function SignaturePanel({ savedSignatures = [], uid, activeSig, onActiveS
   const [showImgModal, setShowImgModal] = useState(false);
   const [showSaved, setShowSaved]       = useState(false);
   const [lightbox, setLightbox]         = useState(false);
+  // The saved signature is stored as a Storage URL, not a data: URL — resolving
+  // it to a data: URL happens once, right here when the user picks it, so any
+  // fetch failure is caught immediately with visible feedback instead of
+  // silently stalling later at submit/PDF time (both of which reuse activeSig
+  // as-is and only re-fetch if it isn't already a data: URL).
+  const [resolvingSig, setResolvingSig] = useState(false);
+  const [slowNotice, setSlowNotice]     = useState(false);
+  const [sigError, setSigError]         = useState("");
+  const [resolvedSaved, setResolvedSaved] = useState(null);
 
   const handleDelete = async (slot) => {
     setDeleting(slot);
@@ -212,7 +231,34 @@ export function SignaturePanel({ savedSignatures = [], uid, activeSig, onActiveS
   };
 
   const slot1 = savedSignatures.find((s) => s.slot === 1);
-  const sigSrc = (data) => data?.url ?? data?.dataUrl ?? null;
+  // dataUrl (stored directly on the Firestore profile) first — url (Storage,
+  // requires a separate fetch) is only a fallback for pre-existing signatures
+  // saved before dataUrl started being stored.
+  const sigSrc = (data) => data?.dataUrl ?? data?.url ?? null;
+  const usingSaved = resolvedSaved && activeSig === resolvedSaved;
+
+  const handleUseSaved = async () => {
+    setSigError("");
+    if (usingSaved) { onActiveSig(null); return; }
+    setResolvingSig(true);
+    setSlowNotice(false);
+    // getBlob() can legitimately take a while to retry through on a slow
+    // connection (seen taking well over 20s in practice) — this just tells
+    // the user it's still working instead of looking frozen while it does.
+    const slowTimer = setTimeout(() => setSlowNotice(true), 8000);
+    try {
+      const dataUrl = await resolveToDataUrl(sigSrc(slot1));
+      setResolvedSaved(dataUrl);
+      onActiveSig(dataUrl);
+    } catch (e) {
+      console.error(e);
+      setSigError(e?.message || "Gagal memuatkan tandatangan tersimpan.");
+    } finally {
+      clearTimeout(slowTimer);
+      setResolvingSig(false);
+      setSlowNotice(false);
+    }
+  };
 
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
@@ -271,10 +317,11 @@ export function SignaturePanel({ savedSignatures = [], uid, activeSig, onActiveS
               {slot1 ? (
                 <>
                   <button
-                    onClick={() => onActiveSig(activeSig === sigSrc(slot1) ? null : sigSrc(slot1))}
-                    className={`rounded px-2 py-1 text-xs font-semibold transition ${activeSig === sigSrc(slot1) ? "bg-green-600 text-white" : "bg-red-900 text-white hover:bg-red-800"}`}
+                    onClick={handleUseSaved}
+                    disabled={resolvingSig}
+                    className={`rounded px-2 py-1 text-xs font-semibold transition disabled:opacity-60 ${usingSaved ? "bg-green-600 text-white" : "bg-red-900 text-white hover:bg-red-800"}`}
                   >
-                    {activeSig === sigSrc(slot1) ? "✓ Dipilih" : "Guna"}
+                    {resolvingSig ? "Memuatkan..." : usingSaved ? "✓ Dipilih" : "Guna"}
                   </button>
                   <button onClick={() => setShowImgModal(true)} className="rounded border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-500 hover:bg-gray-100 transition">
                     Tukar
@@ -289,6 +336,12 @@ export function SignaturePanel({ savedSignatures = [], uid, activeSig, onActiveS
                 </button>
               )}
             </div>
+            {slowNotice && (
+              <p className="w-full rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">Sambungan perlahan — masih cuba memuatkan tandatangan, sila tunggu...</p>
+            )}
+            {sigError && (
+              <p className="w-full rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700">{sigError}</p>
+            )}
           </div>
         )}
       </div>

@@ -136,6 +136,17 @@ export const getAllBorangByClub = async (club) => {
     .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
 };
 
+// Owner-only edit of a submission's own content while it's still pending review
+// (see firestore.rules — status/createdBy are locked, only the content fields
+// below are writable). Distinct from updateBorangStatus, which is the reviewer's
+// approve/reject/selesai action and never touches these content fields.
+export const updateBorangFields = async (id, data) => {
+  await updateDoc(doc(db, "formSubmissions", id), {
+    ...data,
+    updatedAt: serverTimestamp(),
+  });
+};
+
 export const updateBorangStatus = async (id, status, reviewer, additionalData = {}) => {
   await updateDoc(doc(db, "formSubmissions", id), {
     status,

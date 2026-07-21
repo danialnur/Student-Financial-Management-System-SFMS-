@@ -106,9 +106,13 @@ service cloud.firestore {
                       isReviewerOfClub(resource.data.createdByClub)
                     );
       allow create: if isTreasurer() && request.auth.uid == request.resource.data.createdBy;
-      allow update, delete: if isAdmin() || (
-                      isTreasurer() && request.auth.uid == resource.data.createdBy
-                    );
+      // Editing is also open to the owning club's bendahari_kelab (they manage
+      // the club's records day-to-day); deletion stays limited to admin/owner
+      // treasurer so a club manager can't wipe out a programme's history.
+      allow update: if isAdmin() ||
+                      (isTreasurer() && request.auth.uid == resource.data.createdBy) ||
+                      inClub(resource.data.createdByClub);
+      allow delete: if isAdmin() || (isTreasurer() && request.auth.uid == resource.data.createdBy);
     }
 
     // ── programmes ─────────────────────────────────────────────────────────
@@ -146,7 +150,15 @@ service cloud.firestore {
                       isReviewerOfCategory(resource.data.createdByClub, resource.data.createdByCategory)
                     );
       allow create: if isTreasurer() && request.auth.uid == request.resource.data.createdBy;
-      allow update: if isReviewerOfCategory(resource.data.createdByClub, resource.data.createdByCategory);
+      // Reviewers update to approve/reject/etc. The owning treasurer may also
+      // edit their own submission's content, but only while it's still
+      // pending review, and never the status or ownership fields themselves
+      // — those stay reserved for the reviewer action above.
+      allow update: if isReviewerOfCategory(resource.data.createdByClub, resource.data.createdByCategory) ||
+                      (isTreasurer() && request.auth.uid == resource.data.createdBy &&
+                       resource.data.status in ['menunggu', 'disemak'] &&
+                       request.resource.data.status    == resource.data.status &&
+                       request.resource.data.createdBy == resource.data.createdBy);
       allow delete: if isAdmin();
     }
 
