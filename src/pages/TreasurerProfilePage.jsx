@@ -1,3 +1,5 @@
+// TreasurerProfilePage.jsx
+
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -46,6 +48,8 @@ export default function TreasurerProfilePage() {
     setFieldErrors(p => ({ ...p, [name]: "" }));
   };
 
+  // UC15: matric number and phone are exact-length validated to catch
+  // truncated/incomplete entry, matching the format enforced at registration.
   const validate = () => {
     const errors = {};
     if (!form.fullName.trim())     errors.fullName     = "Nama penuh diperlukan.";

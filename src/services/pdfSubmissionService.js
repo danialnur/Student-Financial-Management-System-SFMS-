@@ -93,6 +93,7 @@ export async function getPdfSubmissionsByCategory(category) {
     .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
 }
 
+// Treasurer — every PDF they've submitted, all statuses.
 export async function getPdfSubmissionsByUser(uid) {
   const snap = await getDocs(query(collection(db, "pdfSubmissions"), where("createdBy", "==", uid)));
   return snap.docs
@@ -100,6 +101,7 @@ export async function getPdfSubmissionsByUser(uid) {
     .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
 }
 
+// UC12 equivalent for direct PDF uploads (mirrors formService.updateBorangStatus).
 export async function updatePdfSubmissionStatus(id, status, reviewer, additionalData = {}) {
   await updateDoc(doc(db, "pdfSubmissions", id), {
     status,

@@ -10,11 +10,18 @@ export const MAX_PENDING_REQUESTS = 1; // one pending request at a time across a
 const accessRef   = collection(db, "programmeAccess");
 const accessDocId = (treasurerUid, programmeId) => `${treasurerUid}_${programmeId}`;
 
+// Enforces MAX_PENDING_REQUESTS — a treasurer may only have one outstanding
+// request across all programmes at any time.
 async function countPending(treasurerUid) {
   const snap = await getDocs(query(accessRef, where("treasurerUid", "==", treasurerUid)));
   return snap.docs.filter(d => d.data().status === "pending").length;
 }
 
+// UC8 entry point. The access doc's id is deterministic
+// (`${treasurerUid}_${programmeId}`), so a first-time request creates it,
+// while a repeat visit to the same programme re-reads that same doc and
+// branches on its existing status (rejected = permanently blocked for
+// self-service, revoked = allowed to re-request, pending/approved = no-op).
 export async function requestProgrammeAccess({ programmeId, programmeCode, programmeName, club, treasurerUid, treasurerEmail, treasurerUsername }) {
   const docRef = doc(db, "programmeAccess", accessDocId(treasurerUid, programmeId));
   const snap   = await getDoc(docRef);
@@ -81,14 +88,19 @@ export async function getAccessRequestsByClub(club) {
     .sort((a, b) => (b.requestedAt?.seconds ?? 0) - (a.requestedAt?.seconds ?? 0));
 }
 
+// UC9: Bendahari Kelab/Admin grants a pending request.
 export async function approveAccess(id) {
   await updateDoc(doc(db, "programmeAccess", id), { status: "approved", approvedAt: serverTimestamp() });
 }
 
+// UC9: Bendahari Kelab/Admin denies a pending request (permanent for
+// self-service — see requestProgrammeAccess()'s "rejected" branch).
 export async function rejectAccess(id) {
   await updateDoc(doc(db, "programmeAccess", id), { status: "rejected", rejectedAt: serverTimestamp() });
 }
 
+// Bendahari Kelab/Admin pulls back a previously *approved* grant — distinct
+// from rejectAccess(), which only applies to a still-pending request.
 export async function revokeAccess(id) {
   await updateDoc(doc(db, "programmeAccess", id), { status: "revoked", revokedAt: serverTimestamp() });
 }

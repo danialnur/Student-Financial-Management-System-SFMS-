@@ -1,3 +1,5 @@
+// BendahariKelabAccessPage.jsx 
+
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -107,6 +109,8 @@ export default function BendahariKelabAccessPage() {
   const [showTreasurerAlreadyApproved, setShowTreasurerAlreadyApproved] = useState(false);
   const [approveBlocked, setApproveBlocked]                 = useState(null);
 
+  // Loads every access record and every programme for this club in parallel —
+  // both are needed together to know which programmes are still available to grant.
   const load = async () => {
     if (!club) { setLoading(false); return; }
     setLoading(true);
@@ -126,6 +130,8 @@ export default function BendahariKelabAccessPage() {
 
   useEffect(() => { load(); }, [club]);
 
+  // Shared wrapper for every approve/reject/revoke-rejection action below —
+  // runs the given programmeAccessService function, shows a success popup, then reloads.
   const act = async (fn, id, popupMsg) => {
     setActioning(id); setErrorMsg("");
     try {
@@ -139,6 +145,9 @@ export default function BendahariKelabAccessPage() {
     }
   };
 
+  // Only one treasurer may hold approved access to a given programme at a
+  // time, so approving a second request for the same programme is blocked
+  // (with the existing occupant surfaced) instead of silently double-granting it.
   const handleApproveClick = (r) => {
     const occupant = records.find(
       rec => rec.programmeId === r.programmeId && rec.status === "approved" && rec.treasurerUid !== r.treasurerUid
@@ -170,6 +179,9 @@ export default function BendahariKelabAccessPage() {
   };
 
   // Grant modal actions
+  // "Grant Directly" flow, step 1: looks up a treasurer account by exact
+  // username/email match so the bendahari_kelab can hand them access without
+  // that treasurer having gone through the request flow themselves.
   const handleGrantSearch = async () => {
     if (!grantSearch.trim()) return;
     setGrantSearching(true);
@@ -217,6 +229,8 @@ export default function BendahariKelabAccessPage() {
     }
   };
 
+  // "Grant Directly" flow, final step: writes an already-approved access
+  // record for the selected treasurer+programme pair (see grantDirectAccess()).
   const handleGrant = async () => {
     if (!selectedTreasurer || !selectedProgId) return;
     const prog = programmes.find(p => p.id === selectedProgId);

@@ -1,3 +1,5 @@
+// AddTransactionPage.jsx
+
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createTransaction } from "../services/transactionService";
@@ -49,6 +51,8 @@ export default function AddTransactionPage() {
   const [errorMsg, setErrorMsg]         = useState("");
   const [success, setSuccess]           = useState(false);
 
+  // Pre-fills the programme from whatever the treasurer last selected on the
+  // dashboard (cached in localStorage), so this page can be reached directly.
   useEffect(() => {
     if (!currentUser?.uid) return;
     const saved = localStorage.getItem(`sfms_prog_${currentUser.uid}`);
@@ -74,6 +78,8 @@ export default function AddTransactionPage() {
     }
   };
 
+  // Rejects the whole batch if any selected file exceeds MAX_FILE_SIZE,
+  // otherwise appends the files with an empty "No. Resit" field for the user to fill in.
   const handleFileChange = (e) => {
     const incoming = Array.from(e.target.files || []);
     const oversized = incoming.filter((f) => f.size > MAX_FILE_SIZE);
@@ -99,6 +105,8 @@ export default function AddTransactionPage() {
     e.preventDefault();
     setErrorMsg("");
 
+    // Required fields, positive amount, and — for expenses only — at least
+    // one receipt with a filled-in receipt number.
     if (!form.programmeCode)
       return setErrorMsg("Tiada program dipilih. Sila kembali ke papan pemuka dan pilih program.");
     if (!form.date || !form.amount || !form.category)
@@ -110,6 +118,8 @@ export default function AddTransactionPage() {
     if (form.type === "expense" && receiptFiles.some((rf) => !rf.noResit.trim()))
       return setErrorMsg("Sila isi No. Resit untuk setiap resit yang dimuat naik.");
 
+    // Client-side rate limit: blocks accidental double-submits/spamming by
+    // requiring TXN_COOLDOWN_MS to pass since this user's last transaction.
     const lastKey = `sfms_last_txn_${currentUser.uid}`;
     const last = Number(localStorage.getItem(lastKey) || 0);
     const elapsed = Date.now() - last;
@@ -139,6 +149,8 @@ export default function AddTransactionPage() {
       setLoading(true);
       localStorage.setItem(lastKey, String(Date.now()));
 
+      // Upload every attached receipt to Storage before writing the
+      // transaction, so the Firestore doc can embed each file's final URL/path.
       let receipts = [];
       if (receiptFiles.length) {
         try {

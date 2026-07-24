@@ -1,3 +1,5 @@
+// PegawaiReportPage.jsx
+
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -30,6 +32,9 @@ export default function PegawaiReportPage() {
   const [hasReport, setHasReport] = useState(false);
   const [errorMsg, setErrorMsg]   = useState("");
 
+  // Whenever the pegawai switches supervised club, reload that club's
+  // programme list (for the filter dropdown) and clear any previously
+  // generated report — it belonged to the old club.
   useEffect(() => {
     if (!selectedClub) { setProgrammes([]); setSelectedCode(""); setRecords([]); setHasReport(false); return; }
     setLoadingProg(true);
@@ -40,6 +45,8 @@ export default function PegawaiReportPage() {
     setSelectedCode(""); setRecords([]); setHasReport(false);
   }, [selectedClub]);
 
+  // UC11: fetches approved transactions for the supervised club, optionally
+  // narrowed to one programme and/or a date range.
   const handleLoadReport = async () => {
     setErrorMsg("");
     if (!selectedClub) { setErrorMsg("Sila pilih kelab terlebih dahulu."); return; }

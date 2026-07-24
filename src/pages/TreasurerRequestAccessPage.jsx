@@ -1,3 +1,5 @@
+// ProgrammeRequestAccessPage.jsx
+
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -20,6 +22,9 @@ export default function TreasurerRequestAccessPage() {
     return null;
   }
 
+  // Submits the access request; requestProgrammeAccess() throws one of a
+  // fixed set of error codes (MAX_PENDING_EXCEEDED / MAX_ATTEMPTS_EXCEEDED /
+  // CANCELLED_BY_SELF) which are mapped here to a user-facing Malay message.
   const handleConfirm = async () => {
     setSubmitting(true);
     setError("");

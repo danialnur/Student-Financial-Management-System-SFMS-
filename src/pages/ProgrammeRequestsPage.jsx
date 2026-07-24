@@ -1,3 +1,5 @@
+// ProgrammeRequestsPage.jsx
+
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -16,6 +18,9 @@ export default function ProgrammeRequestsPage() {
   const [message, setMessage]     = useState("");
   const [actioning, setActioning] = useState(null);
 
+  // Pending "new programme" proposals for this bendahari_kelab's own club
+  // (not to be confused with a treasurer's *access* request handled by
+  // BendahariKelabAccessPage.jsx — this approves the programme record itself).
   const load = async () => {
     if (!club) { setLoading(false); return; }
     setLoading(true);
@@ -30,6 +35,7 @@ export default function ProgrammeRequestsPage() {
 
   useEffect(() => { load(); }, [club]);
 
+  // Approves the proposed programme, then refreshes the list so it drops off.
   const handleApprove = async (id, code) => {
     setActioning(id); setErrorMsg(""); setMessage("");
     try {

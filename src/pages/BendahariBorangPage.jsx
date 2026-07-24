@@ -54,6 +54,8 @@ export default function BendahariBorangPage() {
   const [typeFilter, setTypeFilter]   = useState("");
   const [viewing, setViewing]         = useState(null);
 
+  // Loads every form ever submitted by this club (any status), transparency
+  // view for the bendahari_kelab regardless of who the form was addressed to.
   useEffect(() => {
     if (!club) { setLoading(false); return; }
     setLoading(true);
@@ -63,6 +65,7 @@ export default function BendahariBorangPage() {
       .finally(() => setLoading(false));
   }, [club]);
 
+  // Client-side status/form-type filtering over the already-loaded list.
   const filtered = allForms.filter((item) => {
     if (statusFilter && item.status !== statusFilter) return false;
     if (typeFilter   && item.formType !== typeFilter)  return false;

@@ -1,3 +1,5 @@
+// EditTransactionPage.jsx
+
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getTransactionById, updateTransactionFields } from "../services/transactionService";
@@ -24,6 +26,9 @@ const INCOME_CATEGORIES = [
   "Lain-lain",
 ];
 
+// Per UC6: Admin can edit any transaction; a treasurer only their own;
+// a bendahari_kelab only transactions created within their own club;
+// advisor/pegawai have no edit rights here (view-only via the search page).
 function canEditTransaction(data, { userRole, currentUser, userProfile }) {
   if (userRole === "admin") return true;
   if (userRole === "treasurer") return data.createdBy === currentUser.uid;
@@ -59,6 +64,10 @@ export default function EditTransactionPage() {
       .catch((err) => console.error("Failed to load programmes:", err));
   }, []);
 
+  // Fetches the transaction by its route id, then immediately re-checks
+  // authorization against the loaded data (not just the route) before
+  // populating the edit form — the transaction's own createdBy/createdByClub
+  // is what canEditTransaction() actually needs to decide.
   useEffect(() => {
     const loadTransaction = async () => {
       try {

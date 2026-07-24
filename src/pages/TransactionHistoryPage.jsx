@@ -1,3 +1,5 @@
+// TransactionHistoryPage.jsx
+
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getTransactionsByUser, removeTransaction } from "../services/transactionService";
@@ -31,6 +33,8 @@ export default function TransactionHistoryPage() {
     }
   };
 
+  // Narrows history to the treasurer's currently-selected programme (cached
+  // from the dashboard) if one is set; otherwise shows every transaction they've made.
   useEffect(() => {
     if (!currentUser?.uid) return;
     const saved = localStorage.getItem(`sfms_prog_${currentUser.uid}`);
@@ -40,6 +44,8 @@ export default function TransactionHistoryPage() {
     loadTransactions(prog?.code ?? null);
   }, [currentUser]);
 
+  // Per UC6, the treasurer may delete any transaction they created regardless
+  // of status; removeTransaction() also cleans up its receipt file(s) in Storage.
   const handleDelete = async (item) => {
     if (!window.confirm("Padam transaksi ini?")) return;
     try {

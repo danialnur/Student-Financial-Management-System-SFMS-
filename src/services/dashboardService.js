@@ -10,6 +10,7 @@ const programmesRef = collection(db, "programmes");
 const PENDING_STATUSES  = ["menunggu", "disemak"];
 const APPROVED_STATUSES = ["diluluskan", "selesai"];
 
+// Treasurer's own income/expense totals, optionally narrowed to one programme.
 export async function getTreasurerDashboardSummary(uid, programmeCode) {
   const constraints = [where("createdBy", "==", uid)];
   if (programmeCode) constraints.push(where("programmeCode", "==", programmeCode));
@@ -24,6 +25,9 @@ export async function getTreasurerDashboardSummary(uid, programmeCode) {
   return { totalIncome, totalExpense, balance: totalIncome - totalExpense };
 }
 
+// System-wide totals for the Admin dashboard: merges form (borang) and PDF
+// submissions into one combined, sorted "submissions" list and derives
+// pending/approved/rejected counts and income/expense totals across all users.
 export async function getAdminDashboardSummary() {
   const [usersSnap, txSnap, forms, pdfs] = await Promise.all([
     getDocs(usersRef),

@@ -33,6 +33,8 @@ export const getIntendedReviewerRole = (item) => {
   return "advisor";
 };
 
+// UC10 entry point — creates a new form submission, always starting at
+// "menunggu" (pending) regardless of what the caller passes in.
 export const submitBorang = async (data) => {
   return addDoc(collection(db, "formSubmissions"), {
     ...data,
@@ -42,6 +44,7 @@ export const submitBorang = async (data) => {
   });
 };
 
+// Treasurer — every form they've submitted, all statuses, newest first.
 export const getBorangByUser = async (uid) => {
   const q = query(
     collection(db, "formSubmissions"),
@@ -53,6 +56,7 @@ export const getBorangByUser = async (uid) => {
     .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
 };
 
+// Admin — every form still awaiting review, unrestricted.
 export const getPendingBorang = async () => {
   const q = query(
     collection(db, "formSubmissions"),
@@ -147,6 +151,8 @@ export const updateBorangFields = async (id, data) => {
   });
 };
 
+// UC12: the reviewer's approve/reject/selesai action — records who reviewed
+// it and merges in any reviewerSection data collected on the review form.
 export const updateBorangStatus = async (id, status, reviewer, additionalData = {}) => {
   await updateDoc(doc(db, "formSubmissions", id), {
     status,

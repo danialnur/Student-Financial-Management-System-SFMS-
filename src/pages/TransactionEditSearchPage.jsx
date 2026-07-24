@@ -1,3 +1,5 @@
+// TransactionEditSearchPage.jsx
+
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -30,6 +32,8 @@ function SortHeader({ label, colKey, sortState, onSort }) {
   );
 }
 
+// Same rule as EditTransactionPage.jsx — decides whether to render a "Sunting"
+// link for this row, or leave it view-only, per UC6's role scoping.
 function canEditTransaction(t, { userRole, currentUser, userProfile }) {
   if (userRole === "admin") return true;
   if (userRole === "treasurer") return t.createdBy === currentUser.uid;
@@ -56,6 +60,9 @@ export default function TransactionEditSearchPage() {
     }
   }, [userRole, selectedClub, navigate]);
 
+  // Every role sees a different scope of transactions in this shared search
+  // page: a treasurer only their own, bendahari_kelab/advisor their club(s),
+  // pegawai the club they're currently supervising, admin (implicitly) everything.
   useEffect(() => {
     if (!currentUser?.uid || !userRole) return;
     if (userRole === "pegawai" && !selectedClub) return;

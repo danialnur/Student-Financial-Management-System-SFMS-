@@ -1,3 +1,5 @@
+// AdvisorDashboard.jsx
+
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -21,6 +23,8 @@ export default function AdvisorDashboard() {
   const [accountSuccessMsg, setAccountSuccessMsg] = useState("");
   const [accountError, setAccountError]         = useState("");
 
+  // Fetches bendahari_kelab self-registrations awaiting this advisor's review,
+  // scoped to the club(s) they are assigned to.
   const loadPendingAccounts = () => {
     if (!clubs.length) { setPendingAccounts([]); setLoadingPending(false); return; }
     setLoadingPending(true);
@@ -30,6 +34,8 @@ export default function AdvisorDashboard() {
       .finally(() => setLoadingPending(false));
   };
 
+  // An advisor can be assigned to more than one club, so fetch each club's
+  // financial summary in parallel and sum them into one combined total.
   useEffect(() => {
     if (!clubs.length) { setLoading(false); return; }
 
@@ -51,6 +57,8 @@ export default function AdvisorDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clubs.join(",")]);
 
+  // Runs after the user confirms the approve/reject popup: calls the matching
+  // userService function, then refreshes the pending list so the row disappears.
   const handleConfirmedAccountAction = async () => {
     if (!confirmAccount) return;
     const { id, action } = confirmAccount;

@@ -15,6 +15,8 @@ import { deleteReceiptByPath } from "./receiptService";
 
 const transactionsRef = collection(db, "transactions");
 
+// Per UC5, a treasurer's own transaction is auto-approved on creation — there
+// is no separate review step for the record itself (only for Borang forms).
 export async function createTransaction(data) {
   const payload = {
     ...data,
@@ -26,6 +28,7 @@ export async function createTransaction(data) {
   return await addDoc(transactionsRef, payload);
 }
 
+// Treasurer's own transactions, optionally narrowed to one programme, newest first.
 export async function getTransactionsByUser(uid, programmeCode) {
   const constraints = [where("createdBy", "==", uid)];
   if (programmeCode) constraints.push(where("programmeCode", "==", programmeCode));
@@ -65,6 +68,7 @@ export async function getPendingTransactionsByProgrammeCodes(codes) {
   return results.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
 }
 
+// Single transaction lookup, e.g. to prefill the edit-transaction form.
 export async function getTransactionById(id) {
   const docRef = doc(db, "transactions", id);
   const snapshot = await getDoc(docRef);
@@ -77,6 +81,9 @@ export async function getTransactionById(id) {
   };
 }
 
+// Overwrites the editable fields of a transaction (date, type, category,
+// amount, description, etc.); amount is coerced back to a number since form
+// inputs supply it as a string.
 export async function updateTransactionFields(id, data) {
   const docRef = doc(db, "transactions", id);
 
@@ -87,6 +94,8 @@ export async function updateTransactionFields(id, data) {
   });
 }
 
+// Used where a transaction's status still needs an explicit reviewer action
+// (legacy/administrative correction) — most transactions never leave "approved".
 export async function updateTransactionStatus(id, status, reviewedBy) {
   const docRef = doc(db, "transactions", id);
 
@@ -99,6 +108,8 @@ export async function updateTransactionStatus(id, status, reviewedBy) {
   });
 }
 
+// Deletes a transaction and any receipt file(s) attached to it in Firebase
+// Storage, so removing a record doesn't leave orphaned files behind.
 export async function removeTransaction(id) {
   const docRef = doc(db, "transactions", id);
   const snapshot = await getDoc(docRef);

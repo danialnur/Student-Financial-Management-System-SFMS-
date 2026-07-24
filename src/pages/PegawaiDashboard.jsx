@@ -18,6 +18,8 @@ export default function PegawaiDashboard() {
       .finally(() => setLoading(false));
   }, []);
 
+  // A pegawai oversees every club in their category but must pick one club
+  // at a time to view its reports/transactions — force that selection first.
   useEffect(() => {
     if (userProfile?.category && !selectedClub) {
       navigate("/pegawai/pilih-kelab", { replace: true });

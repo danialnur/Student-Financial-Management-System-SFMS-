@@ -62,6 +62,9 @@ export default function LoginPage() {
   const [resetError, setResetError]           = useState("");
   const [resetLoading, setResetLoading]       = useState(false);
 
+  // Once AuthContext resolves a signed-in user + role, redirect away from the
+  // login page: pending accounts go to the holding page, everyone else goes
+  // straight to their role-specific dashboard.
   useEffect(() => {
     if (authLoading || !currentUser || !userRole) return;
     if (userProfile?.accountStatus && userProfile.accountStatus !== "active") {
@@ -88,6 +91,10 @@ export default function LoginPage() {
     return errors;
   };
 
+  // Users log in with a username, not an email, so the flow is:
+  // 1. set session persistence based on "Remember Me", 2. resolve the
+  // username to its email via the PII-free `usernames` lookup collection,
+  // 3. authenticate with Firebase Auth using that resolved email.
   const handleLogin = async (e) => {
     e.preventDefault();
     setErrorMsg("");
@@ -121,6 +128,8 @@ export default function LoginPage() {
     }
   };
 
+  // Sends Firebase's built-in password-reset email to the address entered
+  // (note: this form takes an email, unlike the login form which takes a username).
   const handleForgotPassword = async (e) => {
     e.preventDefault();
     setResetMsg("");

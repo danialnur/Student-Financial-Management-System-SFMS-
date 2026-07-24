@@ -1,3 +1,5 @@
+// ReportPage.jsx
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "../components/PageHeader";
@@ -63,6 +65,8 @@ function parseAlamatPenuh(str) {
   return { baris1: str, baris2: "", poskod: "", bandar: "", negeri: "" };
 }
 
+// Autosaves in-progress form input to localStorage (per form type + user) so
+// a treasurer doesn't lose unsent work if they navigate away before submitting.
 const draftKey = (formId, uid) => `sfms_draft_${formId}_${uid}`;
 function saveDraft(formId, uid, formData, rows) {
   try { localStorage.setItem(draftKey(formId, uid), JSON.stringify({ formData, rows, savedAt: Date.now() })); } catch {}
@@ -92,6 +96,9 @@ const statusBadge=(s)=>{
 };
 const typeLabel=(t)=>t==="income"?"Pendapatan":"Perbelanjaan";
 const SUBMIT_TO_LABELS = { bendahari_kelab: "Bendahari Kelab", advisor: "Penasihat Kelab", pegawai: "Pegawai Kewangan" };
+// Builds one blank row object for a form's repeatable table section
+// (config.isRowSection, e.g. "Lampiran A senarai penerima"), keyed by that
+// form's own rowColumns — different forms have different row shapes.
 const emptyRowFor=(config)=>{ const r={}; config.rowColumns.forEach(c=>{r[c.key]=""}); return r; };
 const initialRowsFor=(config)=> config.rowColumns ? Array.from({length: config.fixedRowCount || 1}, () => emptyRowFor(config)) : [];
 
@@ -191,6 +198,11 @@ export default function ReportPage({ tab: forcedTab }) {
   const navigate = useNavigate();
   const { currentUser, userRole, userProfile, refreshProfile } = useAuth();
 
+  // Resolves what value to prefill for a given form field key. Checks a few
+  // hardcoded field-name conventions first (organisasi/program/disediakan_*),
+  // then falls back to the generic autoFillFields map declared per-form in
+  // formsConfig.js — this is what lets one renderer drive all 9 KEW forms
+  // without each needing its own prefill logic.
   const getAutoFillValue = (key, formId) => {
     const uid = currentUser?.uid;
     if (key === "organisasi" || key === "nama_persatuan" || key === "anjuran" || key === "persatuan_jkm") return localStorage.getItem(`sfms_club_${uid}`) || "";
@@ -697,6 +709,8 @@ export default function ReportPage({ tab: forcedTab }) {
     return { ...data, jawatan: progName ? `${data.jawatan} ${progName}` : data.jawatan };
   };
 
+  // Flattens the uploaded-files state for each of a form's mandatoryAttachments
+  // slots into the `${key}Files` arrays actually persisted on the submission doc.
   const mandatoryAttachmentPayload = (config) => {
     const payload = {};
     (config?.mandatoryAttachments ?? []).forEach(att => {
@@ -713,6 +727,11 @@ export default function ReportPage({ tab: forcedTab }) {
     setConfirmSubmitBorang(true);
   };
 
+  // Core UC10 handler, shared by both a fresh submission and revising an
+  // existing pending one (isEdit): validates, persists the submitter's
+  // signature as a data URL (so it survives to be reused when the PDF is
+  // regenerated post-approval), then either updates the existing
+  // formSubmissions doc in place or creates a new one via submitBorang().
   const handleSubmitBorang = async () => {
     setConfirmSubmitBorang(false);
     const config=FORMS_CONFIG.find(f=>f.id===openFormId);
@@ -772,6 +791,8 @@ export default function ReportPage({ tab: forcedTab }) {
     if (kind === "borang" || kind === "borang-edit") closeForm();
   };
 
+  // "Jana PDF" — generates and downloads a preview of the current form's PDF
+  // client-side via its PDF_GENERATORS entry, without submitting anything.
   const handleJanaPdf = async () => {
     const genFn = openFormId ? PDF_GENERATORS[openFormId] : null;
     if (!genFn) return;

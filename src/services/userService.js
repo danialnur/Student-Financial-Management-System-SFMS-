@@ -15,6 +15,7 @@ import { encryptField } from "../utils/fieldEncryption";
 
 const usersRef = collection(db, "users");
 
+// Admin — every account in the system, newest first.
 export async function getAllUsers() {
   const snapshot = await getDocs(usersRef);
   return snapshot.docs
@@ -32,6 +33,7 @@ export async function getEmailByUsername(username) {
   return snap.data().email;
 }
 
+// Pre-registration check: true if any existing user document already uses this email.
 export async function isEmailTaken(email) {
   const normalized = (email || "").trim().toLowerCase();
   if (!normalized) return false;
@@ -106,6 +108,7 @@ export async function getPendingAdminApprovals() {
     .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
 }
 
+// Advisor/Admin action: flips a pending self-registration to active and records who reviewed it.
 export async function approveAccount(uid, reviewer) {
   await updateDoc(doc(db, "users", uid), {
     accountStatus:   "active",
@@ -116,6 +119,7 @@ export async function approveAccount(uid, reviewer) {
   });
 }
 
+// Advisor/Admin action: marks a pending self-registration as rejected and records who reviewed it.
 export async function rejectAccount(uid, reviewer) {
   await updateDoc(doc(db, "users", uid), {
     accountStatus:   "rejected",
@@ -177,6 +181,7 @@ export async function updateUserProfile(uid, { fullName, matricNumber, icNumber,
   });
 }
 
+// Admin action: permanently deletes a user's account doc and its username index entry.
 export async function removeUserAccess(uid) {
   const snap = await getDoc(doc(db, "users", uid));
   const username = snap.exists() ? snap.data().username : null;
@@ -184,6 +189,8 @@ export async function removeUserAccess(uid) {
   if (username) await deleteDoc(doc(db, "usernames", username));
 }
 
+// Used by the shared "Sunting Transaksi" search page to look up a treasurer
+// by exact username or email match, so their transactions can be found/edited.
 export async function searchTreasurerByUsernameOrEmail(term) {
   if (!term.trim()) return [];
   const t = term.trim().toLowerCase();

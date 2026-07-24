@@ -1,3 +1,5 @@
+// TreasurerDashboard.jsx
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -61,6 +63,8 @@ export default function TreasurerDashboard() {
     getAccessByTreasurer(uid).then(setAllAccessRecords).catch(() => {});
   }, [uid]);
 
+  // Withdraws the treasurer's own pending programme-access request, then
+  // refetches access records so the banner/shortcuts reflect the cancellation.
   const handleCancelRequest = async () => {
     if (!cancelTarget) return;
     setCancelling(true);
@@ -247,6 +251,9 @@ export default function TreasurerDashboard() {
     load();
   }, [selectedProgramme, uid]);
 
+  // The dashboard drills down Category -> Club -> Programme. Picking a new
+  // category resets everything below it and persists the choice to
+  // localStorage so it survives a page refresh.
   const handleCategorySelect = (cat) => {
     if (cat === selectedCategory) return;
     setSelectedCategory(cat);
@@ -264,6 +271,8 @@ export default function TreasurerDashboard() {
     }
   };
 
+  // Picking a club clears the selected programme (it belonged to a different
+  // club's list) and persists the choice so the "Load programmes" effect above picks it up.
   const handleClubSelect = (club) => {
     if (club !== selectedClub) {
       setSelectedProgramme(null);
@@ -287,6 +296,9 @@ export default function TreasurerDashboard() {
     navigate("/treasurer/request-access", { state: { programme: p, club: selectedClub } });
   };
 
+  // Lets a treasurer jump straight to an already-approved programme shortcut,
+  // reconstructing the category/club selection state that programme belongs to
+  // without the user having to navigate the picker manually.
   const quickSelectProgramme = (r) => {
     const cat = CLUB_TO_CATEGORY[r.club];
     if (cat) {
@@ -301,6 +313,7 @@ export default function TreasurerDashboard() {
     handleProgrammeSelect(prog);
   };
 
+  // Clicking a column header cycles asc -> desc -> unsorted (back to original order).
   const handleTxnSort = (col) => {
     setTxnSort(prev => {
       if (prev.col !== col) return { col, dir: "asc" };
@@ -310,6 +323,8 @@ export default function TreasurerDashboard() {
     setTxnPage(1);
   };
 
+  // Sorts the transaction modal's list by whichever column is active, with
+  // per-column comparison rules (string vs numeric vs "empty values last").
   const sortedTxnList = useMemo(() => {
     const { col, dir } = txnSort;
     if (!col) return txnList;

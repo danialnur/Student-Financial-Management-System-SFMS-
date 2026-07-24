@@ -1,3 +1,5 @@
+// UserManagementPage.jsx
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createUserWithEmailAndPassword } from "firebase/auth";
@@ -122,6 +124,8 @@ export default function UserManagementPage() {
     finally { setLoading(false); }
   };
 
+  // Advisor/Pegawai self-registrations awaiting Admin's review (bendahari_kelab
+  // registrations are reviewed by the advisor instead — see AdvisorDashboard.jsx).
   const loadPendingApprovals = async () => {
     try { setLoadingApprovals(true); setPendingApprovals(await getPendingAdminApprovals()); }
     catch { setApprovalError("Gagal memuatkan akaun menunggu."); }
@@ -130,6 +134,9 @@ export default function UserManagementPage() {
 
   useEffect(() => { loadUsers(); loadPendingApprovals(); }, []);
 
+  // Runs after the admin confirms the approve/reject popup, then refreshes
+  // both the pending list and the full user list (a newly-approved account
+  // now needs to show up there too).
   const handleConfirmedApprovalAction = async () => {
     if (!confirmApproval) return;
     const { id, action } = confirmApproval;
@@ -161,6 +168,10 @@ export default function UserManagementPage() {
     setShowCreateConfirm(true);
   };
 
+  // UC13: creates the Auth account on the secondary Auth instance (so the
+  // admin stays signed in as themselves), then writes the matching Firestore
+  // profile with accountStatus "active" — an admin-created account skips the
+  // self-registration pending/approval flow entirely.
   const handleConfirmCreate = async () => {
     setCreating(true); setErrorMsg("");
     try {
@@ -198,6 +209,8 @@ export default function UserManagementPage() {
     setShowSaveRoleConfirm(true);
   };
 
+  // Changes a user's role and its club/clubs/category, clearing whichever of
+  // those fields don't apply to the new role (see updateUserRole()).
   const handleConfirmSaveRole = async () => {
     if (!editingUser) return;
     try {
@@ -215,6 +228,9 @@ export default function UserManagementPage() {
     finally { setEditSaving(false); }
   };
 
+  // Permanently deletes the account doc and its username index entry (see
+  // removeUserAccess()) — this does not delete the underlying Firebase Auth
+  // user, only the app-level profile/access.
   const handleConfirmRemove = async () => {
     if (!removeTarget) return;
     try {

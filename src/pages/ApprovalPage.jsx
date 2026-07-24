@@ -1,3 +1,5 @@
+// ApprovalPage.jsx
+
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -57,6 +59,10 @@ export default function ApprovalPage() {
   const [deleteTarget, setDeleteTarget] = useState(null); // { kind:"borang"|"pdf", item }
   const [deleting, setDeleting]         = useState(false);
 
+  // Loads the reviewer's queue of pending Borang, scoped per role: club(s) for
+  // bendahari_kelab/advisor, category (division) for pegawai, everything for
+  // admin. Everyone in scope sees the full club/category list here — see
+  // getIntendedReviewerRole() in formService.js for who may actually act on each row.
   const loadPendingBorang = async () => {
     try {
       setLoadingBorang(true); setBorangError("");
@@ -81,6 +87,7 @@ export default function ApprovalPage() {
   const [pdfError, setPdfError]       = useState("");
   const [pdfActionId, setPdfActionId] = useState("");
 
+  // Same role-scoping as loadPendingBorang(), for directly-uploaded PDF submissions.
   const loadPendingPdf = async () => {
     try {
       setLoadingPdf(true); setPdfError("");
@@ -132,6 +139,10 @@ export default function ApprovalPage() {
     setSelectedReviewerOptions(prev => prev.includes(optKey) ? prev.filter(k => k !== optKey) : [...prev, optKey]);
   };
 
+  // Mirrors ReportPage.jsx's treasurer-side validation, but for the
+  // reviewer's own section: a "fixed" section requires all its own required
+  // fields, a "choice" section requires at least minSelected option(s) chosen
+  // and each chosen option's own required fields filled.
   const validateReviewerSection = (cfg) => {
     const rs = cfg?.reviewerSection;
     if (!rs) return null;
@@ -271,6 +282,9 @@ export default function ApprovalPage() {
     else await handlePdfAction(id, status);
   };
 
+  // UC12 core action: updates the submission's status and, when approving a
+  // form that has a reviewerSection, attaches the reviewer's filled-in data
+  // (signature/name/etc.) so it can be merged into the regenerated PDF later.
   const handleBorangAction = async (id, status, item) => {
     try {
       setBorangActionId(id); setConfirmAction(null);

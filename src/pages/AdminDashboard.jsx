@@ -1,3 +1,5 @@
+// AdminDashboard.jsx
+
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -104,6 +106,8 @@ export default function AdminDashboard() {
   const [detailModal, setDetailModal] = useState(null); // "users" | "transactions" | "pending" | "approved" | "rejected"
   const [detailPage, setDetailPage] = useState(1);
 
+  // System-wide totals (users, transactions, submission counts) computed once
+  // on mount by aggregating across every club/programme — see getAdminDashboardSummary().
   useEffect(() => {
     const loadSummary = async () => {
       try {
@@ -127,6 +131,9 @@ export default function AdminDashboard() {
   const cfg  = detailModal ? DETAIL_CONFIG[detailModal] : null;
   const rows = useMemo(() => (cfg ? cfg.getRows(summary) : []), [cfg, summary]);
 
+  // Re-sorts the currently open detail modal's rows by whichever column was
+  // clicked, using each DETAIL_CONFIG column's own sortValue() extractor so
+  // numeric and text columns compare correctly.
   const sortedRows = useMemo(() => {
     const sortValue = cfg?.columns[sortCol]?.sortValue;
     if (!sortValue) return rows;

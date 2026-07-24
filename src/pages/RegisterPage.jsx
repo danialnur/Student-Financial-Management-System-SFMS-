@@ -105,6 +105,9 @@ export default function RegisterPage() {
   const [errorMsg,            setErrorMsg]            = useState("");
   const [loading,             setLoading]             = useState(false);
 
+  // Generic input handler: updates the form field by name and clears any
+  // existing validation error for that field. Full name is forced to
+  // uppercase to match how it is stored/displayed elsewhere in the system.
   const handleChange = (e) => {
     const { name, value } = e.target;
     const processed = name === "fullName" ? value.toUpperCase() : value;
@@ -112,12 +115,18 @@ export default function RegisterPage() {
     setFieldErrors((prev) => ({ ...prev, [name]: "" }));
   };
 
+  // Switching role changes which fields are required (club/category), so
+  // reset those role-specific fields and any stale errors/messages.
   const handleRoleChange = (e) => {
     setForm((prev) => ({ ...prev, role: e.target.value, club: "", category: "" }));
     setFieldErrors({});
     setErrorMsg("");
   };
 
+  // Client-side validation run before Firebase Auth account creation.
+  // Which fields are checked depends on the selected role (e.g. matric
+  // number only for treasurer, staff number for advisor/pegawai) and each
+  // role has its own required UTM email domain (see EMAIL_DOMAIN_BY_ROLE).
   const validate = () => {
     const errors = {};
 
@@ -173,6 +182,11 @@ export default function RegisterPage() {
     return errors;
   };
 
+  // 1. Validate the form, 2. create the Firebase Auth account (email + password),
+  // 3. write the matching Firestore profile via createUserProfile() — role
+  // decides accountStatus (treasurer is active immediately, others start
+  // pending) — then 4. redirect straight to the dashboard (treasurer) or to
+  // the pending-approval holding page (every other role).
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg("");

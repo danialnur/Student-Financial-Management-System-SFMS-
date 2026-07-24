@@ -1,3 +1,5 @@
+// formsConfig.js
+
 export const FORMS_CONFIG = [
   // ── Form 1: Akuan Penerimaan Wang Tunai ─────────────────────────────────────
   {

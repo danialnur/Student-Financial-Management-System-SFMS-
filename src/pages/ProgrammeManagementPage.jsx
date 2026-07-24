@@ -1,3 +1,5 @@
+// ProgrammeManagementPage.jsx
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -208,6 +210,9 @@ export default function ProgrammeManagementPage() {
     return errors;
   };
 
+  // Validates required fields, then checks the programme code's uniqueness
+  // server-side (client-side validation alone can't catch a race with another
+  // admin creating the same code) before opening the confirm popup.
   const handleAdd = async (e) => {
     e.preventDefault();
     setErrorMsg("");
@@ -223,6 +228,8 @@ export default function ProgrammeManagementPage() {
     setShowAddConfirm(true);
   };
 
+  // Admin-created programmes are approved immediately — unlike a
+  // bendahari_kelab's own proposal, there's no separate review step here.
   const handleConfirmAdd = async () => {
     try {
       setSubmitting(true); setErrorMsg("");
@@ -252,6 +259,8 @@ export default function ProgrammeManagementPage() {
     });
   };
 
+  // Skips the confirm popup entirely if nothing actually changed, so closing
+  // the edit form without editing anything doesn't prompt a pointless confirmation.
   const handleEditSaveClick = () => {
     setErrorMsg("");
     const errors = validateForm(editForm);
@@ -267,6 +276,8 @@ export default function ProgrammeManagementPage() {
     setShowEditConfirm(true);
   };
 
+  // Only re-checks code uniqueness if the code actually changed — re-validating
+  // an unchanged code against itself would always incorrectly report it as taken.
   const handleConfirmEditSave = async () => {
     if (!editingId) return;
     try {

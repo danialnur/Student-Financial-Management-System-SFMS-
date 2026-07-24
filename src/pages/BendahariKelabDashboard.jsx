@@ -30,6 +30,9 @@ export default function BendahariKelabDashboard() {
   const [txnSort, setTxnSort]       = useState({ col: null, dir: null });
   const [txnPage, setTxnPage]       = useState(1);
 
+  // Loads three independent counters for this club in parallel: financial
+  // summary across all its programmes, pending borang count, and pending
+  // programme-access request count — each drives its own dashboard tile.
   useEffect(() => {
     if (!club) return;
     setLoadingSummary(true);
@@ -55,6 +58,8 @@ export default function BendahariKelabDashboard() {
 
   const handleLogout = async () => { await logout(); navigate("/login"); };
 
+  // Fetches every approved transaction for the club, then filters client-side
+  // by type ("income"/"expense") or shows everything for "all".
   const openTxnModal = async (type) => {
     setTxnModal(type);
     setTxnList([]);
